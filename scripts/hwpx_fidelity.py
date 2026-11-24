@@ -1,5 +1,6 @@
 """Refine native HWPX exports using source formatting and rendered anchors."""
 from copy import deepcopy
+import re
 from zipfile import ZipFile
 
 from docx import Document
@@ -155,6 +156,7 @@ def align_equations(document, source_paragraphs, styles):
         if 100 <= size <= 9600:
             for run_properties in math.iter(qn("w:rPr")):
                 set_run_value(run_properties, "sz", round(size / 50))
+        restore_math_italics(math, equation)
         parent = math.getparent()
         if parent.tag == qn("w:p") and all(child.tag in {qn("w:pPr"), qn("m:oMath")} for child in parent):
             style = styles.get(paragraph.get("paraPrIDRef"))
@@ -172,6 +174,35 @@ def align_equations(document, source_paragraphs, styles):
             display.append(math)
 
 
+def restore_math_italics(math, equation):
+    if equation.get("font", "").casefold() != "hancomeqn":
+        return
+    script = first(equation, "script")
+    expression = (script.text or "").replace("{", "").replace("}", "") if script is not None else ""
+    if not re.fullmatch(r"[-+*/=<>a-zA-Z0-9(). \t]+", expression):
+        return
+    variables = re.findall(r"[a-zA-Z]+", expression)
+    if not variables or any(len(name) != 1 for name in variables):
+        return
+    # HancomEQN uses private glyphs and lacks OpenType MATH. Preserve the Word
+    # math font and restore Hancom's italic style for ordinary variables.
+    for run in math.iter(qn("m:r")):
+        if run.findtext(qn("m:t")) not in variables:
+            continue
+        properties = run.find(qn("m:rPr"))
+        if properties is None:
+            properties = OxmlElement("m:rPr")
+            run.insert(0, properties)
+        if properties.find(qn("m:nor")) is not None:
+            continue
+        style = properties.find(qn("m:sty"))
+        if style is None:
+            style = OxmlElement("m:sty")
+            properties.insert_element_before(style, "m:brk", "m:aln")
+        if style.get(qn("m:val")) in (None, "p"):
+            style.set(qn("m:val"), "i")
+
+
 def note_line(pdf, last_page=False):
     pages = [pdf[-1]] if last_page else pdf
     matches = []
@@ -181,7 +212,7 @@ def note_line(pdf, last_page=False):
             in_position = (baseline(line) < page.rect.height * 0.45 if last_page
                            else baseline(line) > page.rect.height * 0.6)
             if raised and line[0] is raised[0] and in_position:
-                matches.append(line)
+                matches.append((page, line))
     return matches[0] if len(matches) == 1 else None
 
 
@@ -193,29 +224,33 @@ def note_part(document, note):
     return part
 
 
-def remove_endnote_separator(document, part, root):
+def set_note_separator(document, root, note, paragraph):
     separator = next((entry for entry in root if entry.get(qn("w:type")) == "separator"), None)
     if separator is None:
-        separator = OxmlElement("w:endnote")
+        separator = OxmlElement(f"w:{note}")
         identifier = min(int(entry.get(qn("w:id"))) for entry in root) - 1
         separator.set(qn("w:type"), "separator")
         separator.set(qn("w:id"), str(identifier))
         root.insert(0, separator)
         settings = document.settings.element
-        properties = settings.find(qn("w:endnotePr"))
+        properties = settings.find(qn(f"w:{note}Pr"))
         if properties is None:
-            properties = OxmlElement("w:endnotePr")
-            settings.insert_element_before(properties, "w:compat", "w:docVars", "w:rsids", "m:mathPr")
-        reference = OxmlElement("w:endnote")
+            properties = OxmlElement(f"w:{note}Pr")
+            successors = ("w:endnotePr",) if note == "footnote" else ()
+            settings.insert_element_before(properties, *successors, "w:compat", "w:docVars", "w:rsids", "m:mathPr")
+        reference = OxmlElement(f"w:{note}")
         reference.set(qn("w:id"), str(identifier))
         properties.append(reference)
-    paragraph = parse_xml(
+    separator[:] = [paragraph]
+
+
+def compact_endnotes(document, root):
+    spacer = parse_xml(
         f'<w:p {nsdecls("w")}><w:pPr>'
         '<w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/>'
         '<w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>'
     )
-    separator[:] = [paragraph]
-    part._blob = serialize(root)
+    set_note_separator(document, root, "endnote", spacer)
     # The new section exists only for endnotes. Give Word a minimal body line
     # so inheriting the main paragraph style does not push the notes down.
     leading = document.add_paragraph()
@@ -230,25 +265,67 @@ def serialize(root):
     return etree.tostring(root, encoding="UTF-8", xml_declaration=True, standalone=True)
 
 
+def note_rules(page, line, near_start=True):
+    note_x = line[0]["origin"][0]
+    line_y = baseline(line)
+    return [drawing for drawing in page.get_drawings()
+            if drawing["rect"].width >= 20 and drawing["rect"].height <= 2
+            and (not near_start or abs(drawing["rect"].x0 - note_x) <= 12)
+            and 0 < line_y - drawing["rect"].y0 <= 36]
+
+
+def style_footnote_rule(document, root, drawing, line):
+    stroke = drawing.get("color")
+    width = drawing.get("width")
+    if drawing["type"] != "s" or not stroke or len(stroke) != 3 or not width or not 0.25 <= width <= 2:
+        return
+    if len(drawing["items"]) != 1 or drawing["items"][0][0] != "l":
+        return
+    if drawing.get("dashes") not in (None, "[] 0"):
+        return
+    rect = drawing["rect"]
+    section = document.sections[0]
+    left = round((rect.x0 - section.left_margin.pt) * 20)
+    right = round((section.page_width.pt - section.right_margin.pt - rect.x1) * 20)
+    color = "".join(f"{round(value * 255):02X}" for value in stroke[:3])
+    size = round(width * 8)
+    separator = parse_xml(
+        f'<w:p {nsdecls("w")}><w:pPr><w:pBdr>'
+        f'<w:bottom w:val="single" w:sz="{size}" w:space="0" w:color="{color}"/>'
+        '</w:pBdr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/>'
+        f'<w:ind w:left="{left}" w:right="{right}"/>'
+        '<w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>'
+    )
+    set_note_separator(document, root, "footnote", separator)
+    marker = next(root.iter(qn("w:footnoteRef")), None)
+    if marker is None:
+        return
+    paragraph = next(marker.iterancestors(qn("w:p")))
+    if len(paragraph.getparent()) == 1 and not list(paragraph.iter(qn("w:br"))):
+        spacing = paragraph.get_or_add_pPr().get_or_add_spacing()
+        spacing.set(qn("w:lineRule"), "exact")
+        spacing.set(qn("w:line"), str(round(main_span(line)["size"] * 1.5 * 20)))
+
+
 def style_notes(document, source_pdf, counts, separate_endnotes):
     for note in ("footnote", "endnote"):
         is_endnote = note == "endnote"
         if counts[note + "s"] != 1 or (is_endnote and not separate_endnotes):
             continue
-        line = note_line(source_pdf, last_page=is_endnote)
-        if line is None:
+        anchor = note_line(source_pdf, last_page=is_endnote)
+        if anchor is None:
             continue
+        page, line = anchor
         part = note_part(document, note)
         root = parse_xml(part.blob)
         for reference in root.iter(qn(f"w:{note}Ref")):
             format_reference(reference.getparent(), raised_spans(line)[0], line)
-        if is_endnote and not any(
-            0 < baseline(line) - drawing["rect"].y0 <= 36 and drawing["rect"].width >= 20
-            and drawing["rect"].height <= 2 for drawing in source_pdf[-1].get_drawings()
-        ):
-            remove_endnote_separator(document, part, root)
-        else:
-            part._blob = serialize(root)
+        rules = note_rules(page, line, near_start=not is_endnote)
+        if is_endnote and not rules:
+            compact_endnotes(document, root)
+        elif not is_endnote and len(rules) == 1:
+            style_footnote_rule(document, root, rules[0], line)
+        part._blob = serialize(root)
 
 
 def refine(source, candidate, target, source_pdf, word_pdf, counts, separate_endnotes):
@@ -269,15 +346,46 @@ def refine(source, candidate, target, source_pdf, word_pdf, counts, separate_end
     return True
 
 
+def position_footnote_rule(root, spacing, source, rendered):
+    separator = next((entry for entry in root if entry.get(qn("w:type")) == "separator"), None)
+    if separator is None or separator.find(".//" + qn("w:bottom")) is None:
+        return 0
+    left = note_rules(*source)
+    right = note_rules(*rendered)
+    if len(left) != 1 or len(right) != 1:
+        return 0
+    original, current = left[0]["rect"], right[0]["rect"]
+    indent = separator.find(".//" + qn("w:ind"))
+    if indent is not None:
+        for key, delta in (("left", original.x0 - current.x0), ("right", current.x1 - original.x1)):
+            if abs(delta) <= 12:
+                attribute = qn("w:" + key)
+                indent.set(attribute, str(int(indent.get(attribute, "0")) + round(delta * 20)))
+    if spacing.get(qn("w:lineRule")) != "exact":
+        return 0
+    original_gap = baseline(source[1]) - (original.y0 + original.y1) / 2
+    current_gap = baseline(rendered[1]) - (current.y0 + current.y1) / 2
+    line_adjustment = original_gap - current_gap
+    if abs(line_adjustment) > 4:
+        return 0
+    line = int(spacing.get(qn("w:line"))) + round(line_adjustment * 20)
+    if line / 20 < main_span(source[1])["size"]:
+        return 0
+    spacing.set(qn("w:line"), str(line))
+    # Exact line height also moves the text baseline a fraction of that change.
+    # Compensate in the note's trailing space without moving the whole section.
+    return round(-line_adjustment * 4)
+
+
 def position_notes(document, original, rendered, counts, separate_endnotes):
     for note in ("footnote", "endnote"):
         is_endnote = note == "endnote"
         if counts[note + "s"] != 1 or (is_endnote and not separate_endnotes):
             continue
-        left, right = note_line(original, is_endnote), note_line(rendered, is_endnote)
-        if left is None or right is None:
+        source, target = note_line(original, is_endnote), note_line(rendered, is_endnote)
+        if source is None or target is None:
             continue
-        delta = baseline(left) - baseline(right)
+        delta = baseline(source[1]) - baseline(target[1])
         if is_endnote:
             section = document.sections[-1]
             desired = max(section.header_distance.pt + 1, section.top_margin.pt + delta)
@@ -297,9 +405,12 @@ def position_notes(document, original, rendered, counts, separate_endnotes):
             style = next((style for style in document.styles if style.style_id == properties.pStyle.val), None)
             inherited = style.paragraph_format.space_after if style is not None else None
             after = inherited.twips if inherited is not None else None
-        if after is not None and 0 <= int(after) - round(delta * 20) <= 400 and abs(delta) <= 10:
-            spacing.set(qn("w:after"), str(int(after) - round(delta * 20)))
-            part._blob = serialize(root)
+        baseline_shift = position_footnote_rule(root, spacing, source, target)
+        if after is not None and abs(delta) <= 10:
+            trailing_space = int(after) - round(delta * 20) + baseline_shift
+            if 0 <= trailing_space <= 400:
+                spacing.set(qn("w:after"), str(trailing_space))
+        part._blob = serialize(root)
 
 
 def position(candidate, target, source_pdf, word_pdf, counts, separate_endnotes):
