@@ -27,3 +27,9 @@ PDF를 Word나 한글 문서로 가져올 때 단, 머리말, 각주, 수식 및
 Codex에 설치하려면 이 저장소를 사용자 스킬 폴더 아래 `file-convert-skill` 폴더로 복제하세요. 한컴과 Microsoft Office 자동화는 데스크톱 사용을 전제로 합니다.
 
 참고한 방식은 HWP 바이너리와 HWPX XML 경로를 구분한 [morningkim/hwp2docx](https://github.com/morningkim/hwp2docx)와 HWPX의 문단·표를 읽어 DOCX를 구성한 [kangdacool/hwpx-editing-skill](https://github.com/kangdacool/hwpx-editing-skill/blob/main/skills/hwpx-editing/scripts/hwpx_to_docx.py)입니다. 이 저장소의 CLI 및 구조 추출 경로는 별도로 작성했습니다. 한컴 형식 처리는 [한컴 자동화 문서](https://developer.hancom.com/en-us/hwpautomation)를 참고했습니다.
+
+## 검증 결과
+
+Windows에서 합성 문서로 16개 방향 모두 결과 파일 생성을 확인했습니다. PDF로 내보내는 6개 방향은 해당 샘플의 렌더 비교를 통과했습니다. 나머지 10개 방향의 샘플은 외형 차이가 있어 엄격 모드 통과 대상으로 볼 수 없습니다.
+
+별도의 Word → HWPX → Word 왕복 샘플에서 수식·각주·미주·머리말·꼬리말·페이지 번호의 문서 구조는 남았습니다. 자간 1.25pt는 1.20pt로 바뀌었고, 첫 한글 가져오기에서 인라인 그림이 누락됐습니다. 이 검증 결과는 문서마다 달라질 수 있습니다.
