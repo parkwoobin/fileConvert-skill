@@ -203,7 +203,7 @@ def restore_hwpx_paper_box(page, render_size, paper_sizes):
     page.set_cropbox(*box)
 
 
-def compare(source_pdf, target_pdf, paper_sizes=()):
+def compare(source_pdf, target_pdf, paper_sizes=(), measure_difference=False):
     from PIL import ImageChops
     import pypdfium2 as pdfium
 
@@ -218,8 +218,10 @@ def compare(source_pdf, target_pdf, paper_sizes=()):
                 left_image, right_image = page_image(left), page_image(right)
                 same_size = all(abs(a - b) <= 0.001 for a, b in zip(source_size, output_size))
                 bounds = None
+                difference = None
                 if left_image.size == right_image.size:
-                    bounds = ImageChops.difference(left_image, right_image).getbbox()
+                    difference = ImageChops.difference(left_image, right_image)
+                    bounds = difference.getbbox()
                 pages.append({
                     "page": index + 1,
                     "source_size_pt": source_size,
@@ -229,6 +231,10 @@ def compare(source_pdf, target_pdf, paper_sizes=()):
                 })
                 if source_render_size != source_size:
                     pages[-1]["source_render_size_pt"] = source_render_size
+                if measure_difference:
+                    pages[-1]["rgb_error"] = (sum((index % 256) * count for index, count in
+                                                   enumerate(difference.histogram()))
+                                                if difference is not None else None)
         return {
             "dpi": DPI,
             "source_pages": len(original),
@@ -236,6 +242,39 @@ def compare(source_pdf, target_pdf, paper_sizes=()):
             "visual_match": len(original) == len(result) and all(page["match"] for page in pages),
             "pages": pages,
         }
+
+
+def refine_hwpx_layout(source, candidate, source_pdf, candidate_pdf, report, layout, separate_endnotes):
+    from hwpx import verify_native_objects
+    from hwpx_fidelity import position, refine
+
+    if report["source_pages"] != report["output_pages"] or report["visual_match"]:
+        return candidate, report
+    before = [page["rgb_error"] for page in report["pages"]]
+    if any(error is None for error in before):
+        return candidate, report
+    counts = layout.native_objects
+    styled = candidate.with_name("styled.docx")
+    if not refine(source, candidate, styled, source_pdf, candidate_pdf, counts, separate_endnotes):
+        return candidate, report
+
+    best_score = sum(before)
+    for path in (styled, styled.with_name("positioned.docx")):
+        preview = path.with_suffix(".pdf")
+        if path != styled:
+            position(styled, path, source_pdf, styled.with_suffix(".pdf"), counts, separate_endnotes)
+        render(path, preview)
+        result = compare(source_pdf, preview, layout.paper_sizes, measure_difference=True)
+        if result["source_pages"] != result["output_pages"]:
+            # The anchors are unreliable if styling changed the pagination.
+            break
+        errors = [page["rgb_error"] for page in result["pages"]]
+        if all(error is not None for error in errors) and sum(errors) < best_score:
+            verify_native_objects(path, counts)
+            best_score = sum(errors)
+            result["hwpx_rgb_error_before"] = before
+            candidate, report = path, result
+    return candidate, report
 
 
 def main():
@@ -294,11 +333,12 @@ def main():
             candidate = scratch / ("result" + extension(target))
             hwpx_layout = convert(source, candidate, pdf_objects=pdf_objects)
             paper_sizes = hwpx_layout.paper_sizes if hwpx_layout else ()
+            has_native_objects = hwpx_layout is not None and hwpx_layout.native_objects is not None
             source_pdf = scratch / "source.pdf"
             output_pdf = scratch / "output.pdf"
             render(source, source_pdf)
             render(candidate, output_pdf)
-            report = compare(source_pdf, output_pdf, paper_sizes)
+            report = compare(source_pdf, output_pdf, paper_sizes, measure_difference=has_native_objects)
             separate_endnotes = False
             if (hwpx_layout and hwpx_layout.endnotes_at_document_end
                     and report["output_pages"] < report["source_pages"]):
@@ -308,12 +348,18 @@ def main():
                 with_section_pdf = scratch / "endnotes-page.pdf"
                 separate_document_endnotes(candidate, with_section)
                 render(with_section, with_section_pdf)
-                adjusted = compare(source_pdf, with_section_pdf, paper_sizes)
+                adjusted = compare(source_pdf, with_section_pdf, paper_sizes, measure_difference=has_native_objects)
                 if adjusted["output_pages"] == adjusted["source_pages"]:
                     verify_native_objects(with_section, hwpx_layout.native_objects)
-                    candidate, report = with_section, adjusted
+                    candidate, output_pdf, report = with_section, with_section_pdf, adjusted
                     separate_endnotes = True
-            if hwpx_layout and hwpx_layout.native_objects is not None:
+            if has_native_objects:
+                try:
+                    candidate, report = refine_hwpx_layout(
+                        source, candidate, source_pdf, output_pdf, report, hwpx_layout, separate_endnotes,
+                    )
+                except (OSError, ValueError, RuntimeError, LookupError) as error:
+                    report["hwpx_refinement_error"] = str(error)
                 report["hwpx_native_objects"] = hwpx_layout.native_objects
                 report["hwpx_endnotes_new_page"] = separate_endnotes
             report["hwpx_structure"] = bool(hwpx_layout and hwpx_layout.native_objects is None)
