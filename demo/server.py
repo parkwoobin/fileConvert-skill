@@ -140,6 +140,8 @@ class Handler(BaseHTTPRequestHandler):
             if (source, target) == (".pdf", ".docx"):
                 command.append("--pdf-objects")
             command.append("--allow-differences")
+            if target in EDITABLE_DOCUMENTS:
+                command.append("--allow-page-count-change")
             try:
                 result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                         timeout=LIMIT_SECONDS, check=False)

@@ -89,9 +89,13 @@ $('convert-form').addEventListener('submit', async e => {
         download.href = objectUrl;
         download.download = file.name.replace(/\.[^.]+$/, '') + '_변환.' + format.value;
         download.hidden = false;
-        message(result.visual_match
-            ? `변환 완료 · ${result.output_pages}페이지의 화면이 비교 기준에서 일치했습니다.`
-            : `변환 완료 · ${result.output_pages}페이지. 원본과 일부 배치나 글꼴이 다를 수 있습니다.`);
+        if (result.source_pages !== result.output_pages) {
+            message(`변환 완료 · 원본 ${result.source_pages}페이지 → 결과 ${result.output_pages}페이지. 편집 가능한 문서로 바뀌면서 페이지 배치가 달라졌습니다.`);
+        } else {
+            message(result.visual_match
+                ? `변환 완료 · ${result.output_pages}페이지의 화면이 비교 기준에서 일치했습니다.`
+                : `변환 완료 · ${result.output_pages}페이지. 원본과 일부 배치나 글꼴이 다를 수 있습니다.`);
+        }
     } catch {
         message('서버와 연결되지 않았습니다. 데모 서버가 실행 중인지 확인해 주세요.', true);
     } finally {

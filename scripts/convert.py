@@ -182,6 +182,8 @@ def main():
     parser.add_argument("--report", type=Path)
     parser.add_argument("--allow-differences", action="store_true",
                         help="Save a visual mismatch if the page count still matches.")
+    parser.add_argument("--allow-page-count-change", action="store_true",
+                        help="Allow reflow to a different page count for editable document output.")
     parser.add_argument("--hwpx-structure", action="store_true",
                         help="Use the direct HWPX XML importer for HWPX to DOCX.")
     parser.add_argument("--pdf-objects", action="store_true",
@@ -196,6 +198,10 @@ def main():
     source, target = args.input.resolve(), args.output.resolve()
     if (extension(source), extension(target)) not in PAIRS:
         parser.error("Unsupported conversion pair. See --list.")
+    if args.allow_page_count_change and (
+        not args.allow_differences or extension(target) not in HANCOM | WORD
+    ):
+        parser.error("--allow-page-count-change requires --allow-differences and editable document output.")
     if args.hwpx_structure and (extension(source), extension(target)) != (".hwpx", ".docx"):
         parser.error("--hwpx-structure requires HWPX input and DOCX output.")
     if args.pdf_objects and (extension(source), extension(target)) != (".pdf", ".docx"):
@@ -222,7 +228,7 @@ def main():
                 with report_path.open("x", encoding="utf-8") as stream:
                     json.dump(report, stream, indent=2)
                     stream.write("\n")
-            if report["source_pages"] != report["output_pages"]:
+            if report["source_pages"] != report["output_pages"] and not args.allow_page_count_change:
                 print(
                     f"Page count changed from {report['source_pages']} to {report['output_pages']}. "
                     "Output was not saved.",
