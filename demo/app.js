@@ -3,21 +3,10 @@ const $ = id => document.getElementById(id);
 const fileInput = $('file');
 const drop = $('drop');
 const format = $('format');
-const mode = $('mode');
 const submit = $('submit');
 const status = $('status');
 const download = $('download');
 const strict = $('strict');
-const modes = {
-    'pdf:docx': [
-        ['objects', '편집 가능한 개체', '글, 그림, 도형을 각각 Word 개체로 변환합니다.'],
-        ['flow', '일반 문서', '편집 가능한 문단과 표 위주로 다시 구성합니다.'],
-    ],
-    'hwpx:docx': [
-        ['native', '한컴 변환', '한컴 한글의 Word 내보내기를 사용합니다.'],
-        ['structure', 'HWPX 구조 읽기', '본문과 표를 옮깁니다. 일부 복잡한 서식은 생략될 수 있습니다.'],
-    ],
-};
 let settings = null;
 let file = null;
 let source = '';
@@ -38,12 +27,6 @@ function resetDownload() {
 function choices(select, values) {
     select.replaceChildren(...values.map(([value, label]) => new Option(label, value)));
 }
-function updateMode() {
-    const options = modes[source + ':' + format.value] || [['native', '기본 변환', '']];
-    choices(mode, options);
-    mode.disabled = active || !file || options.length < 2;
-    $('mode-detail').textContent = options[0][2];
-}
 function selectFile(next) {
     if (active || !settings) return;
     resetDownload();
@@ -57,7 +40,6 @@ function selectFile(next) {
         $('file-label').textContent = '파일 선택 또는 여기에 끌어 놓기';
         $('file-detail').textContent = 'HWPX · HWP · PDF · DOCX · DOC · PPTX · PPT / 최대 32MB';
         format.disabled = submit.disabled = true;
-        updateMode();
         if (next) message('지원 형식의 32MB 이하 파일을 선택해 주세요.', true);
         return;
     }
@@ -68,14 +50,9 @@ function selectFile(next) {
     destinations.sort((a,b) => (a[1] === 'docx' ? -1 : b[1] === 'docx' ? 1 : a[1].localeCompare(b[1])));
     choices(format, destinations.map(([,to]) => [to, to.toUpperCase()]));
     format.disabled = submit.disabled = false;
-    updateMode();
 }
 fileInput.addEventListener('change', () => selectFile(fileInput.files[0]));
-format.addEventListener('change', () => {resetDownload(); message(''); updateMode();});
-mode.addEventListener('change', () => {
-    resetDownload(); message('');
-    $('mode-detail').textContent = modes[source + ':' + format.value]?.find(item => item[0] === mode.value)?.[2] || '';
-});
+format.addEventListener('change', () => {resetDownload(); message('');});
 strict.addEventListener('change', () => {resetDownload(); message('');});
 retry.addEventListener('click', () => {
     if (active) return;
@@ -99,12 +76,12 @@ $('convert-form').addEventListener('submit', async e => {
     if (active || !file || !format.value) return;
     resetDownload();
     active = true;
-    fileInput.disabled = format.disabled = mode.disabled = strict.disabled = submit.disabled = true;
+    fileInput.disabled = format.disabled = strict.disabled = submit.disabled = true;
     submit.textContent = '변환 중';
     message('문서를 변환하고 페이지를 확인하고 있습니다.');
     try {
         const query = new URLSearchParams({
-            from: source, to: format.value, mode: mode.value,
+            from: source, to: format.value,
             fidelity: strict.checked ? 'strict' : 'same-pages',
         });
         const response = await fetch('/api/convert?' + query, {
@@ -130,7 +107,6 @@ $('convert-form').addEventListener('submit', async e => {
     } finally {
         active = false;
         fileInput.disabled = format.disabled = strict.disabled = submit.disabled = false;
-        mode.disabled = !(modes[source + ':' + format.value]?.length > 1);
         submit.textContent = '변환하기';
     }
 });

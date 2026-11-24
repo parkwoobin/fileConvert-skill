@@ -5,18 +5,18 @@ body{margin:0}.wrap{width:min(1080px,calc(100% - 40px));margin:auto}
 .mark{display:grid;place-items:center;width:36px;height:36px;border-radius:9px;color:#102c38;background:#81e5d0;font-size:.88rem}
 .demo{margin-left:auto;color:#bde4df;font-size:.9rem;font-weight:500}
 .intro{padding:57px 0 30px}.intro h1{font-size:clamp(2rem,5vw,3.45rem);letter-spacing:-.06em;margin:0 0 12px}
-.intro p,.hint,.guide dd,.privacy{color:#4a626d;line-height:1.65;margin:0}
+.intro p,.guide dd,.privacy{color:#4a626d;line-height:1.65;margin:0}
 .layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,300px);gap:20px;padding-bottom:44px}
 .panel{background:white;border:1px solid #d7e6e5;border-radius:16px;padding:24px}
 .drop{cursor:pointer;min-height:166px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:9px;text-align:center;padding:16px;border:2px dashed #87bab2;border-radius:12px;background:#f1fbf9;overflow-wrap:anywhere}
 .drop span:last-child{color:#4a626d;font-size:.9rem}.drop:hover,.drop.drag,.panel:has(input:focus-visible) .drop{border-color:#006c60}
 .upload-mark{font-size:1.45rem;font-weight:700;color:#08675d}
 .visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;clip-path:inset(50%);overflow:hidden}
-.controls{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:19px}
+.controls{margin-top:19px}
 .controls label{display:grid;gap:8px;font-weight:700;font-size:.95rem}
 select{width:100%;font:inherit;font-weight:400;padding:9px 12px;border:1px solid #aac5c3;border-radius:8px;min-height:44px;color:#102334;background:white}
 select:disabled{color:#546a72;background:#f4f7f7}
-.hint{min-height:26px;margin:8px 0 4px;font-size:.9rem}.check{display:flex;align-items:center;gap:9px;margin:12px 0 17px;font-size:.93rem}
+.check{display:flex;align-items:center;gap:9px;margin:12px 0 17px;font-size:.93rem}
 .check input{width:18px;height:18px;accent-color:#00695d}
 button,.download{min-height:46px;padding:11px 18px;border-radius:8px;border:0;background:#00695d;color:white;font:inherit;font-weight:700;cursor:pointer;text-align:center}
 button{width:100%}button:disabled{background:#dbe7e6;color:#526c71;cursor:default}
@@ -26,6 +26,6 @@ button{width:100%}button:disabled{background:#dbe7e6;color:#526c71;cursor:defaul
 #status.error{background:#fff2ee;color:#812a16}.download{display:block;margin-top:10px;text-decoration:none}
 [hidden]{display:none!important}:focus-visible{outline:3px solid #008e80;outline-offset:3px}
 @media(max-width:760px){.layout{grid-template-columns:1fr}.intro{padding-top:36px}}
-@media(max-width:440px){.wrap{width:calc(100% - 24px)}.panel{padding:16px}.controls{grid-template-columns:1fr}}
+@media(max-width:440px){.wrap{width:calc(100% - 24px)}.panel{padding:16px}}
 
 .retry{margin-top:10px;color:#005a50;background:#edf7f5;border:1px solid #89b7b0}

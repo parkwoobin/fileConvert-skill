@@ -50,7 +50,7 @@ def validate(path):
         raise ValueError(f"Invalid or unsupported {ext} container: {path.name}")
 
 
-def office(engine, source, target):
+def office(engine, source, target, fit_table_images=False):
     if sys.platform != "win32":
         raise RuntimeError(f"{engine} conversion requires a Windows desktop and the installed application")
     command = [
@@ -58,6 +58,8 @@ def office(engine, source, target):
         engine, str(source), str(target),
         os.environ.get("FILECONVERT_HANCOM_PATH_MODULE", ""),
     ]
+    if engine == "word" and fit_table_images:
+        command.append("--fit-table-images")
     try:
         result = subprocess.run(command, capture_output=True, timeout=120, check=False)
     except subprocess.TimeoutExpired as error:
@@ -68,13 +70,13 @@ def office(engine, source, target):
     validate(target)
 
 
-def render(source, target):
+def render(source, target, fit_table_images=False):
     ext = extension(source)
     if ext == ".pdf":
         shutil.copyfile(source, target)
         return
     engine = "hancom" if ext in HANCOM else "word" if ext in WORD else "powerpoint"
-    office(engine, source, target)
+    office(engine, source, target, fit_table_images)
 
 
 def page_image(page):
@@ -127,7 +129,7 @@ def convert(source, target, hwpx_structure=False, pdf_objects=False):
 
         reconstruct(source, target)
     elif end == ".pdf":
-        render(source, target)
+        render(source, target, fit_table_images=True)
     elif start == ".pdf" and end in SLIDES:
         slides = target if end == ".pptx" else target.with_name("intermediate.pptx")
         pdf_to_slides(source, slides)

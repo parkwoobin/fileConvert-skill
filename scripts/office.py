@@ -19,7 +19,24 @@ def hancom(source, target, module):
         app.Quit()
 
 
-def word(source, target):
+def fit_word_table_images(doc):
+    """Fit inline images inside their cell for PDF export."""
+    for index in range(1, doc.InlineShapes.Count + 1):
+        picture = doc.InlineShapes(index)
+        # wdInlineShapePicture / wdInlineShapeLinkedPicture.
+        if picture.Type not in (3, 4) or not picture.Range.Information(12):
+            continue
+        cell = picture.Range.Cells(1)
+        paragraph = picture.Range.ParagraphFormat
+        left_indent = max(0, paragraph.LeftIndent + max(0, paragraph.FirstLineIndent))
+        right_indent = max(0, paragraph.RightIndent)
+        usable = cell.Width - cell.LeftPadding - cell.RightPadding - left_indent - right_indent
+        if 0 < usable < picture.Width:
+            picture.LockAspectRatio = -1
+            picture.Width = usable
+
+
+def word(source, target, fit_table_images=False):
     from win32com.client import DispatchEx
 
     app = DispatchEx("Word.Application")
@@ -30,6 +47,8 @@ def word(source, target):
         doc = app.Documents.Open(str(source), ReadOnly=True, AddToRecentFiles=False)
         try:
             if target.suffix.lower() == ".pdf":
+                if fit_table_images:
+                    fit_word_table_images(doc)
                 doc.ExportAsFixedFormat(str(target), 17)
             else:
                 doc.SaveAs2(str(target), FileFormat={".doc": 0, ".docx": 16}[target.suffix.lower()])
@@ -57,9 +76,11 @@ def powerpoint(source, target):
 
 
 if __name__ == "__main__":
-    engine, source_path, target_path, module_name = sys.argv[1:]
+    engine, source_path, target_path, module_name, *options = sys.argv[1:]
     source, target = Path(source_path), Path(target_path)
     if engine == "hancom":
         hancom(source, target, module_name)
+    elif engine == "word":
+        word(source, target, "--fit-table-images" in options)
     else:
-        {"word": word, "powerpoint": powerpoint}[engine](source, target)
+        powerpoint(source, target)

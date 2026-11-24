@@ -19,10 +19,7 @@ from convert import PAIRS  # noqa: E402
 MAX_UPLOAD = 32 * 1024 * 1024
 LIMIT_SECONDS = 300
 CONVERSION = Lock()
-MODES = {
-    (".pdf", ".docx"): {"objects": "--pdf-objects", "flow": None},
-    (".hwpx", ".docx"): {"native": None, "structure": "--hwpx-structure"},
-}
+EDITABLE_DOCUMENTS = {".docx", ".doc", ".hwp", ".hwpx"}
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
@@ -86,11 +83,9 @@ class Handler(BaseHTTPRequestHandler):
         options = parse_qs(route.query)
         source = "." + options.get("from", [""])[0]
         target = "." + options.get("to", [""])[0]
-        selection = options.get("mode", ["native"])[0]
-        modes = MODES.get((source, target), {"native": None})
         fidelity = options.get("fidelity", ["strict"])[0]
-        if (source, target) not in PAIRS or selection not in modes or fidelity not in {"strict", "same-pages"}:
-            self.json_reply(400, {"message": "지원하는 변환 방식과 출력 형식을 선택해 주세요."})
+        if (source, target) not in PAIRS or fidelity not in {"strict", "same-pages"}:
+            self.json_reply(400, {"message": "지원하는 출력 형식을 선택해 주세요."})
             return
         if self.headers.get_content_type() != "application/octet-stream":
             self.json_reply(415, {"message": "변환할 파일을 첨부해 주세요."})
@@ -106,13 +101,13 @@ class Handler(BaseHTTPRequestHandler):
             self.json_reply(429, {"message": "다른 파일을 변환하고 있어요. 잠시 후 다시 시도해 주세요."})
             return
         try:
-            self.run_conversion(length, source, target, modes[selection], fidelity)
+            self.run_conversion(length, source, target, fidelity)
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
             self.close_connection = True
         finally:
             CONVERSION.release()
 
-    def run_conversion(self, length, source, target, mode, fidelity):
+    def run_conversion(self, length, source, target, fidelity):
         with TemporaryDirectory(prefix="getconvert-demo-") as folder:
             root = Path(folder)
             input_file = root / ("input" + source)
@@ -127,10 +122,24 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     uploaded.write(chunk)
                     length -= len(chunk)
+            if source == ".pdf" and target in EDITABLE_DOCUMENTS:
+                import pymupdf
+
+                try:
+                    with pymupdf.open(input_file) as pdf:
+                        scanned = not pdf.needs_pass and not any(page.get_text().strip() for page in pdf)
+                except (pymupdf.FileDataError, RuntimeError):
+                    scanned = False  # The CLI reports invalid or unreadable inputs.
+                if scanned:
+                    self.json_reply(422, {
+                        "code": "ocr-needed",
+                        "message": "글자를 인식할 수 없는 이미지 PDF입니다. OCR로 글자를 인식한 PDF를 올려 주세요.",
+                    })
+                    return
             command = [sys.executable, str(SCRIPTS / "convert.py"),
                        str(input_file), str(output_file), "--report", str(report_file)]
-            if mode:
-                command.append(mode)
+            if (source, target) == (".pdf", ".docx"):
+                command.append("--pdf-objects")
             if fidelity == "same-pages":
                 command.append("--allow-differences")
             try:
