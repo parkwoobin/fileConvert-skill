@@ -138,7 +138,7 @@ class Handler(BaseHTTPRequestHandler):
             command = [sys.executable, str(SCRIPTS / "convert.py"),
                        str(input_file), str(output_file), "--report", str(report_file)]
             command.append("--allow-differences")
-            if target in EDITABLE_DOCUMENTS:
+            if target in EDITABLE_DOCUMENTS and (source != ".pdf" or target not in {".hwp", ".hwpx"}):
                 command.append("--allow-page-count-change")
             try:
                 result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

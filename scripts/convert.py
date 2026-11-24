@@ -153,8 +153,12 @@ def convert(source, target, hwpx_structure=False, pdf_objects=False):
     elif start == ".pdf":
         intermediate = target if end == ".docx" else target.with_name("intermediate.docx")
         pdf_to_word(source, intermediate)
-        if end != ".docx":
-            office("hancom" if end in HANCOM else "word", intermediate, target)
+        if end in HANCOM:
+            from hancom_layout import fit
+
+            fit(source, intermediate, target, office)
+        elif end != ".docx":
+            office("word", intermediate, target)
     else:
         office("hancom" if {start, end} & HANCOM else "word", source, target)
     validate(target)
@@ -243,7 +247,10 @@ def main():
                 with report_path.open("x", encoding="utf-8") as stream:
                     json.dump(report, stream, indent=2)
                     stream.write("\n")
-            if report["source_pages"] != report["output_pages"] and not args.allow_page_count_change:
+            fixed_hancom_pagination = extension(source) == ".pdf" and extension(target) in HANCOM
+            if report["source_pages"] != report["output_pages"] and (
+                not args.allow_page_count_change or fixed_hancom_pagination
+            ):
                 print(
                     f"Page count changed from {report['source_pages']} to {report['output_pages']}. "
                     "Output was not saved.",
