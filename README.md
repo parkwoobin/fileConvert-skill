@@ -37,3 +37,16 @@ Windows에서 합성 문서로 16개 방향 모두 결과 파일 생성을 확�
 ## PDF의 글자와 도형을 Word 개체로 분리
 
 고정 배치 PDF에는 `python scripts/convert.py input.pdf output.docx --pdf-objects --allow-differences --report report.json`을 사용할 수 있습니다. 화면 위치에 맞춰 수정 가능한 텍스트 상자, Word 도형, 개별 그림을 배치합니다. 같은 흐름의 여러 줄은 한 텍스트 상자로 묶고, 원본 렌더링을 기준으로 숨은 텍스트와 근접 중복을 걸러냅니다. 자간과 폰트는 근사치이며 해당 글꼴이 설치되어 있어야 원본에 가깝게 표시됩니다. 일부 PDF 그림은 잘라낸 이미지로 들어갑니다. 클리핑, 겹침, 그룹의 복합 효과는 부분적으로만 처리하고 PDF의 표와 문단 구조를 재현하지 않습니다. 개체 편집 검증은 Windows용 Microsoft Word에서 했습니다.
+
+## 겟컨버트 웹 데모
+
+이 저장소에서 의존성을 설치한 뒤 다음 명령을 실행하고 브라우저에서 `http://127.0.0.1:8765/`를 엽니다.
+
+```powershell
+python -m pip install -r requirements.txt
+python demo/server.py
+```
+
+파일 확장자에 맞는 출력 형식을 선택합니다. PDF → DOCX에는 개체 단위 편집과 일반 문서 방식이 있고, HWPX → DOCX에는 한컴 변환과 구조 읽기 방식이 있습니다. 원본과 같은 페이지 수를 요구하며, 화면 일치 검사도 선택할 수 있습니다. 파일은 최대 32MB까지 한 번에 하나씩 처리하고, 업로드와 결과 임시 파일은 요청이 끝나면 정리합니다.
+
+이 데모는 Windows PC의 루프백 주소에서 실행됩니다. 실제 변환과 비교에 로컬 한컴 및 Microsoft Office가 사용되므로 Cloudflare Pages나 Linux Oracle VM에 이 서버를 그대로 배포할 수 없습니다.

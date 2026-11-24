@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="겟컨버트 문서 변환 데모">
+<title>겟컨버트 · 문서 변환 데모</title>
+<link rel="stylesheet" href="/style.css">
+<script defer src="/app.js"></script>
+</head>
+<body>
+<header class="bar"><div class="wrap brand"><span class="mark" aria-hidden="true">GC</span> 겟컨버트 <span class="demo">로컬 데모</span></div></header>
+<main class="wrap">
+  <div class="intro">
+    <h1>문서를 원하는 형식으로</h1>
+    <p>파일을 올리고 변환 형식을 선택하세요. Word에서 글과 그림을 따로 편집할 수 있는 방식도 선택할 수 있습니다.</p>
+  </div>
+  <div class="layout">
+    <form id="convert-form" class="panel">
+      <label for="file" class="drop" id="drop">
+        <span class="upload-mark" aria-hidden="true">+</span>
+        <strong id="file-label">파일 선택 또는 여기에 끌어 놓기</strong>
+        <span id="file-detail">HWPX · HWP · PDF · DOCX · DOC · PPTX · PPT / 최대 32MB</span>
+      </label>
+      <input id="file" type="file" accept=".hwpx,.hwp,.pdf,.docx,.doc,.pptx,.ppt" aria-labelledby="file-label" aria-describedby="file-detail" class="visually-hidden" required>
+      <div class="controls">
+        <label>출력 형식<select id="format" disabled required><option value="">파일을 먼저 선택하세요</option></select></label>
+        <label>변환 방식<select id="mode" disabled><option value="native">기본 변환</option></select></label>
+      </div>
+      <p id="mode-detail" class="hint"></p>
+      <label class="check"><input type="checkbox" id="strict"> 화면이 완전히 일치할 때만 다운로드</label>
+      <button id="submit" type="submit" disabled>변환하기</button>
+      <div id="status" role="status" aria-live="polite" hidden></div>
+      <a class="download" id="download" hidden>변환 파일 다운로드</a>
+    </form>
+    <aside class="panel guide">
+      <h2>변환 방식</h2>
+      <dl>
+        <dt>편집 가능한 개체</dt><dd>PDF의 글, 그림, 도형을 Word에서 각각 선택해 수정할 수 있습니다. 일부 자간과 배치는 달라질 수 있습니다.</dd>
+        <dt>일반 문서</dt><dd>PDF의 내용을 Word 문단과 표로 재구성합니다. 글을 이어 쓰기 편하지만 복잡한 레이아웃은 달라질 수 있습니다.</dd>
+        <dt>결과 확인</dt><dd>변환 전후 페이지를 비교합니다. 페이지 수가 달라지면 결과 파일을 제공하지 않습니다.</dd>
+      </dl>
+      <p class="privacy">파일 처리는 이 PC에서 이루어집니다.</p>
+    </aside>
+  </div>
+</main>
+</body>
+</html>
