@@ -88,28 +88,142 @@ def drawing_events(page):
             yield drawing["seqno"], drawing, clip
 
 
-def visible_text(page, clips):
+def text_rows(page, clips):
     traces = page.get_texttrace()
     if len(traces) != len(clips):
         clips = [page.rect] * len(traces)
-    seen = set()
-    for span, clip in reversed(list(zip(traces, clips))):
+    for span, clip in zip(traces, clips):
         if span["type"] != 0 or span["opacity"] < .05 or span["dir"][0] < .98:
             continue
-        chars = []
+        rows = {}
         for char in span["chars"]:
             code, _, origin, bbox = char
             box = pdf.Rect(bbox)
             if 0 < code <= 0x10ffff and not 0xd800 <= code <= 0xdfff and (box & clip).get_area() >= box.get_area() * .70:
-                chars.append(char)
-        if not chars or not "".join(chr(c[0]) for c in chars).strip():
+                rows.setdefault(round(origin[1], 1), []).append(char)
+        for chars in rows.values():
+            if "".join(chr(c[0]) for c in chars).strip():
+                yield span["seqno"], span, chars
+
+
+def char_bounds(chars):
+    box = pdf.Rect()
+    for char in chars:
+        box |= pdf.Rect(char[3])
+    return box
+
+
+def visible_text(page, clips, covers):
+    import numpy as np
+
+    raster = page.get_pixmap(matrix=pdf.Matrix(2, 2), alpha=False)
+    pixels = np.frombuffer(raster.samples, dtype=np.uint8).reshape(raster.height,raster.width,3).astype(np.int16)
+    rows = []
+    for seq, span, chars in text_rows(page, clips):
+        bbox = char_bounds(chars)
+        if any(later > seq and cover.contains(bbox) for later, cover in covers):
             continue
-        start = chars[0][2]
-        key = (round(start[0], 1), round(start[1], 1), tuple(c[0] for c in chars))
-        if key in seen:
+        color = tuple(bytes.fromhex(tint(span["color"])))
+        tested, hits = 0, 0
+        for code, _, (x,y), limits in chars:
+            if chr(code).isspace():
+                continue
+            # Sample the intended glyph rectangle, excluding adjacent baselines.
+            left, right = max(0,int(2*x)), min(raster.width,int(2*limits[2])+1)
+            top, bottom = max(0,int(2*(y-.86*span["size"]))), min(raster.height,int(2*y+2))
+            sample = pixels[top:bottom,left:right]
+            if sample.size:
+                tested += 1
+                hits += bool((np.abs(sample - color).max(axis=2) <= 53).any())
+        if tested and hits >= max(1, tested*.38):
+            rows.append((seq,span,chars,hits/tested))
+    kept = {}
+    for seq, span, chars, score in sorted(rows,key=lambda row:(row[3],row[0]),reverse=True):
+        x,y=chars[0][2]
+        key="".join(chr(c[0]) for c in chars).strip()
+        if any(abs(x-xx)<=3 and abs(y-yy)<=5 for xx,yy in kept.get(key, ())):
             continue
-        seen.add(key)
-        yield span["seqno"], span, chars
+        kept.setdefault(key,[]).append((x,y))
+        yield seq,span,chars
+
+
+def text_blocks(rows):
+    blocks = []
+    for seq, span, chars in sorted(rows, key=lambda row: (row[2][0][2][1], row[2][0][2][0])):
+        x,y=chars[0][2]
+        size=span["size"]
+        for candidate in reversed(blocks):
+            _, previous, earlier = candidate[-1]
+            x0,y0=earlier[0][2]
+            gap=y-y0
+            if (
+                .90 * size <= gap <= 2.12 * size
+                and abs(x-x0) <= 2.25
+                and abs(size-previous["size"]) <= .18
+                and span["font"] == previous["font"]
+                and tint(span["color"]) == tint(previous["color"])
+                and len(chars) >= 8 and len(earlier) >= 8
+            ):
+                candidate.append((seq,span,chars))
+                break
+        else:
+            candidate = None
+        if candidate is None or candidate[-1][2] is not chars:
+            blocks.append([(seq,span,chars)])
+    return blocks
+
+
+
+def clip_polygon(points, rect):
+    for axis, border, direction in ((0,rect.x0,1),(0,rect.x1,-1),(1,rect.y0,1),(1,rect.y1,-1)):
+        if not points:
+            break
+        clipped=[]
+        prev=points[-1]
+        for point in points:
+            inside=(point[axis]-border)*direction >= 0
+            before=(prev[axis]-border)*direction >= 0
+            if inside != before:
+                ratio=(border-prev[axis])/(point[axis]-prev[axis])
+                clipped.append(pdf.Point(*(a+(b-a)*ratio for a,b in zip(prev,point))))
+            if inside:
+                clipped.append(point)
+            prev=point
+        points=clipped
+    return points
+
+
+def contours(items):
+    points=[]
+    for item in items:
+        kind=item[0]
+        if kind in ("l","c"):
+            if points and points[-1] != item[1]:
+                yield points
+                points=[]
+            if not points:
+                points=[item[1]]
+            if kind=="l":
+                points.append(item[-1])
+            else:
+                a,b,c,d=item[1:]
+                for i in range(1,13):
+                    t=i/12
+                    u=1-t
+                    points.append(pdf.Point(*(u**3*x+3*u*u*t*y+3*u*t*t*z+t**3*w
+                                              for x,y,z,w in zip(a,b,c,d))))
+        else:
+            if points:
+                yield points
+                points=[]
+            if kind=="re":
+                r=item[1]
+                yield [r.tl,r.tr,r.br,r.bl]
+            elif kind=="qu":
+                q=item[1]
+                yield [q.ul,q.ur,q.lr,q.ll]
+    if points:
+        yield points
 
 
 class Writer:
@@ -134,30 +248,47 @@ class Writer:
         paragraph.add_run()._element.append(pict)
         return node
 
-    def text(self, paragraph, seq, span, chars):
-        from docx.oxml.ns import qn
+    def text(self, paragraph, seq, lines):
         from docx.text.paragraph import Paragraph
+        from docx.oxml.ns import qn
 
-        x, baseline = chars[0][2]
-        size = span["size"]
-        right = max(c[3][2] for c in chars)
-        rendered_width = max(4, right-x)
-        text = "".join(chr(c[0]) for c in chars)
-        # Word lays out a line inside each box, leaving text individually editable.
+        _, first_span, first_chars = lines[0]
+        x, baseline = first_chars[0][2]
+        size = first_span["size"]
+        right = max(char_bounds(chars).x1 for _,_,chars in lines)
+        bottom = lines[-1][2][0][2][1]
         left, top = max(0, x), max(0, baseline - size * .94)
-        node = self.shape(paragraph, pdf.Rect(left, top, left + rendered_width*1.32+3, top+size*1.7), seq, "rect")
+        width = max(4, right-x)*1.24+4
+        node = self.shape(paragraph, pdf.Rect(left, top, min(left+width,self.page_size[0]), bottom+size), seq, "rect")
         node.set("filled", "f")
         node.set("stroked", "f")
         textbox = etree.SubElement(node, V + "textbox", inset="0,0,0,0")
         content = OxmlElement("w:txbxContent")
         textbox.append(content)
-        body = OxmlElement("w:p")
-        content.append(body)
-        line = Paragraph(body, paragraph)
-        fmt = line.paragraph_format
-        fmt.space_before = fmt.space_after = Pt(0)
-        fmt.line_spacing = Pt(size * 1.12)
-        run = line.add_run(text)
+        for index, (_, span, chars) in enumerate(lines):
+            body = OxmlElement("w:p")
+            content.append(body)
+            line = Paragraph(body, paragraph)
+            fmt = line.paragraph_format
+            fmt.space_before = fmt.space_after = Pt(0)
+            fmt.keep_with_next = False
+            for tag in ("w:autoSpaceDE", "w:autoSpaceDN"):
+                option = OxmlElement(tag)
+                option.set(qn("w:val"), "0")
+                body.get_or_add_pPr().append(option)
+            line_height = span["size"] * 1.12
+            fmt.line_spacing = Pt(line_height)
+            if index+1 < len(lines):
+                gap = lines[index+1][2][0][2][1] - chars[0][2][1]
+                fmt.space_after = Pt(max(0,gap-line_height))
+            self.styled_run(line, span, chars)
+
+    def styled_run(self, line, span, chars):
+        from docx.oxml.ns import qn
+
+        size = span["size"]
+        x = chars[0][2][0]
+        run = line.add_run("".join(chr(c[0]) for c in chars))
         source_face = span["font"].split("+")[-1]
         if source_face.startswith("Malgun"):
             face = "Malgun Gothic"
@@ -170,7 +301,9 @@ class Writer:
         run.font.bold = span["font"].endswith(("B", "B00", "Bold"))
         run.font.color.rgb = RGBColor.from_string(tint(span["color"]))
         rpr = run._element.get_or_add_rPr()
-        rpr.get_or_add_rFonts().set(qn("w:eastAsia"), face)
+        fonts = rpr.get_or_add_rFonts()
+        fonts.set(qn("w:eastAsia"), face)
+        fonts.set(qn("w:cs"), face)
         if len(chars) > 1:
             natural = sum(max(0, c[3][2]-c[3][0]) for c in chars[:-1])
             tracking = round(((chars[-1][2][0] - x - natural)/(len(chars)-1))*20)
@@ -189,10 +322,18 @@ class Writer:
         clipped = rect & clip
         if clipped.is_empty:
             return
-        if rect.get_area() > 0 and clipped.get_area() < rect.get_area() * .96:
-            if len(draw["items"]) != 1 or draw["items"][0][0] != "re":
+        if clipped.get_area() < rect.get_area() * .995:
+            if draw.get("fill") is None:
+                return
+            polygons = [clip_polygon(points, clip) for points in contours(draw["items"])]
+            polygons = [points for points in polygons if len(points) >= 3]
+            if not polygons:
                 return
             rect = clipped
+            draw = {**draw, "color": None, "closePath": True, "items": [
+                ("l", a, b) for points in polygons
+                for a,b in zip(points, points[1:]+points[:1])
+            ]}
         node = self.shape(paragraph, rect, seq)
 
         def xy(p):
@@ -281,7 +422,6 @@ class Writer:
         if len(images) != len(image_clips):
             image_clips = [page.rect] * len(images)
         events = [(seq, "path", (draw, clip)) for seq, draw, clip in drawing_events(page)]
-        events += [(seq, "text", (span, chars)) for seq, span, chars in visible_text(page, text_clips)]
         blocks = [block for block in page.get_text("dict")["blocks"] if block["type"] == 1]
         if len(blocks) != len(images):
             blocks = [None] * len(images)
@@ -290,15 +430,11 @@ class Writer:
         covers = [(seq, draw["rect"] & clip) for seq, kind, args in events if kind == "path"
                   for draw, clip in [args] if draw.get("fill") is not None
                   and draw.get("fill_opacity", 1) > .99 and len(draw["items"]) == 1 and draw["items"][0][0] == "re"]
+        blocks = text_blocks(visible_text(page, text_clips, covers))
+        events += [(max(row[0] for row in block), "text", block) for block in blocks]
         for seq, kind, args in sorted(events, key=lambda x: x[0]):
             if kind == "text":
-                _, chars = args
-                box = pdf.Rect()
-                for c in chars:
-                    box |= pdf.Rect(c[3])
-                if any(later > seq and cover.contains(box) for later, cover in covers):
-                    continue
-                self.text(anchor, seq, *args)
+                self.text(anchor, seq, args)
             elif kind == "path":
                 self.path(anchor, seq, *args)
             else:
