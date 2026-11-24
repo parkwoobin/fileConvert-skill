@@ -160,9 +160,9 @@ def convert(source, target, hwpx_structure=False, pdf_objects=False):
         elif end != ".docx":
             office("word", intermediate, target)
     elif start == ".docx" and end in HANCOM:
-        from word_hancom import preserve_page_starts
+        from word_hancom import convert_word_to_hancom
 
-        preserve_page_starts(source, target, office)
+        convert_word_to_hancom(source, target, office)
     else:
         office("hancom" if {start, end} & HANCOM else "word", source, target)
     validate(target)

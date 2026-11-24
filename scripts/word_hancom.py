@@ -109,3 +109,21 @@ def preserve_page_starts(source, target, office):
         if rank[:2] == (0, 0) or len(pages) <= len(source_pages) or not blanks:
             break
     copyfile(best[1], target)
+
+
+def convert_word_to_hancom(source, target, office):
+    from word_borders import read_word_borders, repair_borders
+
+    specs = read_word_borders(source)
+    if not any(table and any(table[2].values()) for table in specs):
+        preserve_page_starts(source, target, office)
+        return
+
+    imported = target.with_name("word-import.hwpx")
+    preserve_page_starts(source, imported, office)
+    repaired = target.with_name("word-table-borders.hwpx")
+    candidate = repaired if repair_borders(specs, imported, repaired) else imported
+    if target.suffix.lower() == ".hwp":
+        office("hancom", candidate, target)
+    else:
+        copyfile(candidate, target)
