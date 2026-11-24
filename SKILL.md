@@ -7,7 +7,7 @@ Use the bundled converter on a Windows desktop with the Office apps required for
 
 1. Resolve the skill folder from this `SKILL.md`. Run `python <skill-folder>/scripts/convert.py --list` to check the requested direction.
 2. Use absolute input and output paths. Run `python <skill-folder>/scripts/convert.py INPUT OUTPUT --report REPORT.json`. Choose new paths for both the output and report.
-3. Inspect the report before describing the result. HWPX → DOCX uses editable XML import by default and saves when the rendered page count matches. Use `--require-visual-match` if the user requires identical rendering. Other routes require a render match by default. Check requested editable structures, such as tables, formulas, footnotes and page fields, in the output independently.
+3. Inspect the report before describing the result. HWPX → DOCX automatically uses Hancom export for documents with footnotes, endnotes or equations and verifies the editable Word objects. Other HWPX files use direct XML import. The default requires the original page count. Use `--require-visual-match` for identical rendering. Other format pairs require a render match by default. Check requested document structures in the output independently.
 
 When a user accepts visual differences, add `--allow-differences`. For an editable document whose pages may reflow, also add `--allow-page-count-change`. PDF → HWP/HWPX still requires the original page count.
 

@@ -1,4 +1,6 @@
-"""Map HWPX paragraphs, character styles and tables to editable Word elements."""
+"""Convert HWPX structure and validate editable Word objects in native exports."""
+from collections import Counter
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePosixPath
 import re
@@ -12,7 +14,17 @@ from docx.shared import Pt, RGBColor, Twips
 from lxml import etree
 
 SECTION = re.compile(r"Contents/section(\d+)\.xml")
+WORD_STORY = re.compile(r"word/(document|header\d+|footer\d+|footnotes|endnotes)\.xml")
 PART_LIMIT = 24 * 1024 * 1024
+OBJECT_NAMES = ("footNote", "endNote", "equation")
+MATH = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
+
+
+@dataclass(frozen=True)
+class ConversionLayout:
+    paper_sizes: frozenset[tuple[float, float]]
+    native_objects: dict[str, int] | None
+    endnotes_at_document_end: bool
 
 
 def kind(element):
@@ -40,6 +52,69 @@ def xml(package, name):
     if root.getroottree().docinfo.doctype:
         raise ValueError("HWPX XML must not contain a DTD")
     return root
+
+
+def page_dimensions(root):
+    page = next((node for node in root.iter() if kind(node) == "pagePr"), None)
+    if page is None:
+        return None, (None, None)
+    dimensions = (int(page.get(key, "0")) for key in ("width", "height"))
+    return page, tuple(Twips(round(value / 5)) if value > 0 else None for value in dimensions)
+
+
+def inspect_layout(package, sections):
+    sizes = set()
+    counts = Counter()
+    placements = []
+    for name in sections:
+        root = xml(package, name)
+        _, dimensions = page_dimensions(root)
+        sizes.add(tuple(length.pt for length in dimensions) if all(dimensions) else None)
+        for node in root.iter():
+            tag = kind(node)
+            counts[tag] += 1
+            if tag == "endNotePr":
+                placement = first(node, "placement")
+                placements.append(
+                    placement is not None and placement.get("place") == "END_OF_DOCUMENT"
+                    and placement.get("beneathText") == "0"
+                )
+    native_objects = None
+    if any(counts[name] for name in OBJECT_NAMES):
+        native_objects = {
+            "footnotes": counts["footNote"], "endnotes": counts["endNote"],
+            "equations": counts["equation"], "tables": counts["tbl"],
+        }
+    document_endnotes = bool(counts["endNote"] and placements and all(placements))
+    return ConversionLayout(frozenset(sizes) if None not in sizes else frozenset(),
+                            native_objects, document_endnotes)
+
+
+def verify_native_objects(target, expected):
+    with ZipFile(target) as package:
+        stories = {name: xml(package, name) for name in package.namelist() if WORD_STORY.fullmatch(name)}
+    objects = {
+        "equations": sum(1 for story in stories.values() for _ in story.iter(MATH + "oMath")),
+        "tables": sum(1 for story in stories.values() for _ in story.iter(qn("w:tbl"))),
+    }
+    for note in ("footnote", "endnote"):
+        part_name = note + "s"
+        body = stories.get(f"word/{part_name}.xml")
+        note_ids = {entry.get(qn("w:id")) for entry in body if entry.tag == qn(f"w:{note}")
+                    and entry.get(qn("w:type"), "normal") == "normal"} if body is not None else set()
+        references = {element.get(qn("w:id")) for story in stories.values()
+                      for element in story.iter(qn(f"w:{note}Reference"))}
+        objects[part_name] = len((references & note_ids) - {None})
+    missing = [f"{name} ({objects[name]}/{count})" for name, count in expected.items() if objects[name] < count]
+    if missing:
+        raise ValueError("DOCX export lost editable objects: " + ", ".join(missing))
+
+
+def separate_document_endnotes(source, target):
+    document = Document(source)
+    # Word places document-end notes after the final body section.
+    document.add_section(WD_SECTION_START.NEW_PAGE)
+    document.save(target)
 
 
 class Converter:
@@ -140,8 +215,6 @@ class Converter:
                     self.add_picture(run, item)
                 elif tag == "tbl":
                     tables.append(item)
-                elif tag == "equation":
-                    run.add_text("[수식]")
         for table in tables:
             self.add_table(host, table)
 
@@ -170,16 +243,12 @@ class Converter:
                         self.add_paragraph(cell, paragraph, cell.paragraphs[0] if index == 0 else None)
 
     def configure_page(self, section, root):
-        page = next((node for node in root.iter() if kind(node) == "pagePr"), None)
+        page, dimensions = page_dimensions(root)
         if page is None:
             return
-        paper_size = []
-        for key in ("width", "height"):
-            value = int(page.get(key, "0"))
-            if value > 0:
-                length = Twips(round(value / 5))
+        for key, length in zip(("width", "height"), dimensions):
+            if length is not None:
                 setattr(section, "page_" + key, length)
-                paper_size.append(length.pt)
         margins = first(page, "margin")
         if margins is not None:
             for key in ("top", "bottom", "left", "right"):
@@ -188,26 +257,30 @@ class Converter:
             for key in ("header", "footer"):
                 if margins.get(key) is not None:
                     setattr(section, key + "_distance", Pt(int(margins.get(key)) / 100))
-        return tuple(paper_size) if len(paper_size) == 2 else None
 
-    def save(self, target):
-        sections = sorted(
-            (int(match.group(1)), member) for member in self.package.namelist()
-            if (match := SECTION.fullmatch(member))
-        )
-        if not sections:
-            raise ValueError("HWPX does not contain a body section")
-        paper_sizes = set()
-        for index, (_, name) in enumerate(sections):
+    def save(self, target, sections):
+        for index, name in enumerate(sections):
             root = xml(self.package, name)
             section = self.document.add_section(WD_SECTION_START.NEW_PAGE) if index else self.document.sections[0]
-            paper_sizes.add(self.configure_page(section, root))
+            self.configure_page(section, root)
             for paragraph in elements(root, "p"):
                 self.add_paragraph(self.document, paragraph)
         self.document.save(target)
-        return paper_sizes if None not in paper_sizes else ()
 
 
-def convert(source, target):
+def convert(source, target, export_native):
     with ZipFile(source) as package:
-        return Converter(package).save(target)
+        numbered_sections = sorted(
+            (int(match.group(1)), member) for member in package.namelist()
+            if (match := SECTION.fullmatch(member))
+        )
+        sections = [name for _, name in numbered_sections]
+        if not sections:
+            raise ValueError("HWPX does not contain a body section")
+        layout = inspect_layout(package, sections)
+        if layout.native_objects is None:
+            Converter(package).save(target, sections)
+            return layout
+    export_native(source, target)
+    verify_native_objects(target, layout.native_objects)
+    return layout

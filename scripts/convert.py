@@ -1,6 +1,7 @@
 """FileConvert local CLI."""
 import argparse
 from contextlib import closing
+from functools import partial
 from io import BytesIO
 import json
 import os
@@ -133,11 +134,11 @@ def upstream_to_word(source, target):
 
 def convert(source, target, pdf_objects=False):
     start, end = extension(source), extension(target)
-    paper_sizes = ()
+    hwpx_layout = None
     if (start, end) == (".hwpx", ".docx"):
-        from hwpx import convert as convert_structure
+        from hwpx import convert as convert_hwpx
 
-        paper_sizes = convert_structure(source, target)
+        hwpx_layout = convert_hwpx(source, target, export_native=partial(office, "hancom"))
     elif pdf_objects:
         from pdf_objects import reconstruct
 
@@ -181,7 +182,7 @@ def convert(source, target, pdf_objects=False):
     else:
         office("hancom" if {start, end} & HANCOM else "word", source, target)
     validate(target)
-    return paper_sizes
+    return hwpx_layout
 
 
 def restore_hwpx_paper_box(page, render_size, paper_sizes):
@@ -291,13 +292,31 @@ def main():
         with TemporaryDirectory(prefix="fileconvert-") as directory:
             scratch = Path(directory)
             candidate = scratch / ("result" + extension(target))
-            paper_sizes = convert(source, candidate, pdf_objects=pdf_objects)
+            hwpx_layout = convert(source, candidate, pdf_objects=pdf_objects)
+            paper_sizes = hwpx_layout.paper_sizes if hwpx_layout else ()
             source_pdf = scratch / "source.pdf"
             output_pdf = scratch / "output.pdf"
             render(source, source_pdf)
             render(candidate, output_pdf)
             report = compare(source_pdf, output_pdf, paper_sizes)
-            report["hwpx_structure"] = is_hwpx_to_docx
+            separate_endnotes = False
+            if (hwpx_layout and hwpx_layout.endnotes_at_document_end
+                    and report["output_pages"] < report["source_pages"]):
+                from hwpx import separate_document_endnotes, verify_native_objects
+
+                with_section = scratch / "endnotes-page.docx"
+                with_section_pdf = scratch / "endnotes-page.pdf"
+                separate_document_endnotes(candidate, with_section)
+                render(with_section, with_section_pdf)
+                adjusted = compare(source_pdf, with_section_pdf, paper_sizes)
+                if adjusted["output_pages"] == adjusted["source_pages"]:
+                    verify_native_objects(with_section, hwpx_layout.native_objects)
+                    candidate, report = with_section, adjusted
+                    separate_endnotes = True
+            if hwpx_layout and hwpx_layout.native_objects is not None:
+                report["hwpx_native_objects"] = hwpx_layout.native_objects
+                report["hwpx_endnotes_new_page"] = separate_endnotes
+            report["hwpx_structure"] = bool(hwpx_layout and hwpx_layout.native_objects is None)
             report["pdf_objects"] = pdf_objects
             report["input_format"] = extension(source)
             report["output_format"] = extension(target)
