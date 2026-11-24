@@ -7,3 +7,4 @@ python-docx==1.2.0
 pdf2docx==0.5.13
 PyMuPDF==2.1
 fonttools==4.68.0
+olefile==0.47

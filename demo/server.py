@@ -137,8 +137,6 @@ class Handler(BaseHTTPRequestHandler):
                     return
             command = [sys.executable, str(SCRIPTS / "convert.py"),
                        str(input_file), str(output_file), "--report", str(report_file)]
-            if (source, target) == (".pdf", ".docx"):
-                command.append("--pdf-objects")
             command.append("--allow-differences")
             if target in EDITABLE_DOCUMENTS:
                 command.append("--allow-page-count-change")

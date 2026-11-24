@@ -114,8 +114,21 @@ def pdf_to_word(source, target):
     from pdf2docx import Converter
 
     with closing(Converter(str(source))) as document:
-        document.convert(str(target))
+        document.convert(str(target), parse_lattice_table=True, parse_stream_table=True)
     validate(target)
+
+
+def upstream_to_word(source, target):
+    script = {".hwp": "hwp2docx.py", ".hwpx": "hwpx_to_docx.py"}[extension(source)]
+    exporter = Path(__file__).with_name("upstream") / script
+    command = [sys.executable, "-X", "utf8", str(exporter), str(source), str(target)]
+    try:
+        result = subprocess.run(command, capture_output=True, timeout=120, check=False)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("HWP/HWPX to Word conversion timed out") from error
+    if result.returncode:
+        detail = (result.stderr or result.stdout).decode("utf-8", errors="replace").strip()
+        raise RuntimeError(detail.splitlines()[-1] if detail else "HWP/HWPX to Word conversion failed")
 
 
 def convert(source, target, hwpx_structure=False, pdf_objects=False):
@@ -128,6 +141,8 @@ def convert(source, target, hwpx_structure=False, pdf_objects=False):
         from pdf_objects import reconstruct
 
         reconstruct(source, target)
+    elif start in HANCOM and end == ".docx":
+        upstream_to_word(source, target)
     elif end == ".pdf":
         render(source, target, fit_table_images=True)
     elif start == ".pdf" and end in SLIDES:
