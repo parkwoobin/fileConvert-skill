@@ -116,12 +116,16 @@ def pdf_to_word(source, target):
     validate(target)
 
 
-def convert(source, target, hwpx_structure=False):
+def convert(source, target, hwpx_structure=False, pdf_objects=False):
     start, end = extension(source), extension(target)
     if hwpx_structure:
         from hwpx import convert as convert_structure
 
         convert_structure(source, target)
+    elif pdf_objects:
+        from pdf_objects import reconstruct
+
+        reconstruct(source, target)
     elif end == ".pdf":
         render(source, target)
     elif start == ".pdf" and end in SLIDES:
@@ -178,6 +182,8 @@ def main():
                         help="Save a visual mismatch if the page count still matches.")
     parser.add_argument("--hwpx-structure", action="store_true",
                         help="Use the direct HWPX XML importer for HWPX to DOCX.")
+    parser.add_argument("--pdf-objects", action="store_true",
+                        help="Reconstruct PDF as positioned Word text boxes, pictures, and shapes.")
     args = parser.parse_args()
     if args.list:
         for start, end in sorted(PAIRS):
@@ -190,6 +196,8 @@ def main():
         parser.error("Unsupported conversion pair. See --list.")
     if args.hwpx_structure and (extension(source), extension(target)) != (".hwpx", ".docx"):
         parser.error("--hwpx-structure requires HWPX input and DOCX output.")
+    if args.pdf_objects and (extension(source), extension(target)) != (".pdf", ".docx"):
+        parser.error("--pdf-objects requires PDF input and DOCX output.")
     report_path = args.report.resolve() if args.report else None
     if target.exists() or (report_path and (report_path.exists() or report_path == target)):
         parser.error("Output and report paths must be distinct new files.")
@@ -198,13 +206,14 @@ def main():
         with TemporaryDirectory(prefix="fileconvert-") as directory:
             scratch = Path(directory)
             candidate = scratch / ("result" + extension(target))
-            convert(source, candidate, args.hwpx_structure)
+            convert(source, candidate, args.hwpx_structure, args.pdf_objects)
             source_pdf = scratch / "source.pdf"
             output_pdf = scratch / "output.pdf"
             render(source, source_pdf)
             render(candidate, output_pdf)
             report = compare(source_pdf, output_pdf)
             report["hwpx_structure"] = args.hwpx_structure
+            report["pdf_objects"] = args.pdf_objects
             report["input_format"] = extension(source)
             report["output_format"] = extension(target)
             if report_path:
