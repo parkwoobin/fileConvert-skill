@@ -360,6 +360,8 @@ class Writer:
         source_face = span["font"].split("+")[-1]
         if source_face.startswith("Malgun"):
             face = "Malgun Gothic"
+        elif source_face.startswith("NanumBarunGothic"):
+            face = "NanumBarunGothic"
         elif source_face.startswith("NanumSquare"):
             face = "NanumSquare"
         else:
@@ -452,7 +454,13 @@ class Writer:
             node.set("stroked", "f")
         else:
             node.set("strokecolor", "#" + tint(draw["color"]))
-            node.set("strokeweight", f"{draw.get('width') or .25:.3f}pt")
+            width = draw.get("width") or .25
+            node.set("strokeweight", f"{width:.3f}pt")
+            dash_spec = re.search(r"\[([^\]]+)\]", draw.get("dashes") or "")
+            if dash_spec:
+                parts = [max(.1, float(length) / width) for length in dash_spec[1].split()]
+                if any(parts):
+                    etree.SubElement(node, V + "stroke", dashstyle=" ".join(f"{length:.3g}" for length in parts))
 
     def picture(self, paragraph, page, seq, box, clip, block):
         rect = box & clip
@@ -526,7 +534,12 @@ class Writer:
         images = [(i, pdf.Rect(box)) for i, (kind, box) in enumerate(page.get_bboxlog()) if kind == "fill-image"]
         if len(images) != len(image_clips):
             image_clips = [page.rect] * len(images)
-        events = [(seq, "path", (draw, clip)) for seq, draw, clip in drawing_events(page)]
+        events = [
+            (seq, "path", (draw, clip))
+            for seq, draw, clip in drawing_events(page)
+            if not (seq == 0 and draw.get("color") is None and draw.get("fill") == (1., 1., 1.)
+                    and (draw["rect"] & page.rect).get_area() >= .99 * page.rect.get_area())
+        ]
         blocks = [block for block in page.get_text("dict")["blocks"] if block["type"] == 1]
         if len(blocks) != len(images):
             blocks = [None] * len(images)
@@ -546,6 +559,42 @@ class Writer:
                 self.picture(anchor, args[0], seq, *args[1:])
 
 
+def prefers_positioned_layout(source):
+    """Identify designed documents whose page backgrounds must stay behind editable text."""
+    with pdf.open(source) as document:
+        if not len(document):
+            return False
+        sample_count = min(12, len(document))
+        indices = (range(len(document)) if sample_count == len(document) else
+                   sorted({0, 1, *(round(i * (len(document) - 1) / (sample_count - 1))
+                                    for i in range(sample_count))}))
+        designed = 0
+        for index in indices:
+            page = document[index]
+            area = page.rect.get_area()
+            if not area or not page.get_text().strip():
+                continue
+            panels = {}
+            full_background = False
+            for draw in page.get_drawings():
+                fill = draw.get("fill")
+                if fill is None or draw.get("fill_opacity", 1) < .85:
+                    continue
+                bounds = draw["rect"] & page.rect
+                fraction = bounds.get_area() / area
+                red, green, blue = bytes.fromhex(tint(fill))
+                chroma = max(red, green, blue) - min(red, green, blue)
+                if fraction >= .70 and (chroma >= 25 or max(red, green, blue) < 190):
+                    full_background = True
+                    break
+                if .018 <= fraction <= .28 and chroma >= 6:
+                    panels[tuple(round(value) for value in bounds)] = fraction
+            if full_background or (len(panels) >= 4 and sum(panels.values()) >= .10):
+                designed += 1
+        minimum = 1 if len(document) <= 3 else max(2, (len(indices) + 3) // 4)
+        return designed >= minimum
+
+
 def reconstruct(source, target, limit=None):
     writer = Writer()
     with pdf.open(source) as document:
@@ -555,6 +604,41 @@ def reconstruct(source, target, limit=None):
             writer.add_page(page)
     with target.open("xb") as stream:
         writer.doc.save(stream)
+
+
+def try_positioned_hancom(source, target, office):
+    """Use editable positions for designed PDFs when Hancom retains the page content."""
+    from collections import Counter
+    from PIL import ImageChops, ImageStat
+    from shutil import copyfile
+
+    draft = target.with_name("positioned-input.docx")
+    candidate = target.with_name("positioned-output" + target.suffix)
+    preview = target.with_name("positioned-check.pdf")
+    reconstruct(source, draft)
+    office("hancom", draft, candidate)
+    office("hancom", candidate, preview)
+    with pdf.open(source) as original, pdf.open(preview) as result:
+        if len(original) != len(result):
+            return False
+        for before, after in zip(original, result):
+            if max(abs(before.rect.width - after.rect.width),
+                   abs(before.rect.height - after.rect.height)) > 2:
+                return False
+            source_text = Counter(char for char in before.get_text() if char.isalnum())
+            result_text = Counter(char for char in after.get_text() if char.isalnum())
+            if sum((source_text & result_text).values()) < .88 * sum(source_text.values()):
+                return False
+            if before.get_image_info() and not after.get_image_info():
+                return False
+            thumbnails = [Image.frombytes("RGB", (p.width, p.height), p.samples)
+                          for page in (before, after) for p in [page.get_pixmap(matrix=pdf.Matrix(.18, .18))]]
+            left, right = thumbnails
+            difference = ImageStat.Stat(ImageChops.difference(left, right.resize(left.size))).mean
+            if sum(difference) / len(difference) > 18:
+                return False
+    copyfile(candidate, target)
+    return True
 
 
 def main():

@@ -151,6 +151,18 @@ def convert(source, target, hwpx_structure=False, pdf_objects=False):
         if end == ".ppt":
             office("powerpoint", slides, target)
     elif start == ".pdf":
+        if end in HANCOM:
+            from pdf_objects import prefers_positioned_layout, try_positioned_hancom
+
+            if prefers_positioned_layout(source):
+                try:
+                    positioned = try_positioned_hancom(source, target, office)
+                except (RuntimeError, ValueError, OSError) as error:
+                    print(f"Hancom positioned layout unavailable: {error}", file=sys.stderr)
+                else:
+                    if positioned:
+                        validate(target)
+                        return
         intermediate = target if end == ".docx" else target.with_name("intermediate.docx")
         pdf_to_word(source, intermediate)
         if end in HANCOM:
@@ -209,7 +221,10 @@ def main():
                         help="Allow reflow to a different page count for editable document output.")
     parser.add_argument("--hwpx-structure", action="store_true",
                         help="Use the direct HWPX XML importer for HWPX to DOCX.")
-    parser.add_argument("--pdf-objects", action="store_true",
+    pdf_modes = parser.add_mutually_exclusive_group()
+    pdf_modes.add_argument("--pdf-reflow", action="store_true",
+                           help="Reconstruct paragraphs and tables even for a designed PDF.")
+    pdf_modes.add_argument("--pdf-objects", action="store_true",
                         help="Reconstruct PDF as positioned Word text boxes, pictures, and shapes.")
     args = parser.parse_args()
     if args.list:
@@ -227,24 +242,30 @@ def main():
         parser.error("--allow-page-count-change requires --allow-differences and editable document output.")
     if args.hwpx_structure and (extension(source), extension(target)) != (".hwpx", ".docx"):
         parser.error("--hwpx-structure requires HWPX input and DOCX output.")
-    if args.pdf_objects and (extension(source), extension(target)) != (".pdf", ".docx"):
-        parser.error("--pdf-objects requires PDF input and DOCX output.")
+    is_pdf_to_docx = (extension(source), extension(target)) == (".pdf", ".docx")
+    if (args.pdf_objects or args.pdf_reflow) and not is_pdf_to_docx:
+        parser.error("PDF layout options require PDF input and DOCX output.")
     report_path = args.report.resolve() if args.report else None
     if target.exists() or (report_path and (report_path.exists() or report_path == target)):
         parser.error("Output and report paths must be distinct new files.")
     try:
         validate(source)
+        pdf_objects = args.pdf_objects
+        if is_pdf_to_docx and not (pdf_objects or args.pdf_reflow):
+            from pdf_objects import prefers_positioned_layout
+
+            pdf_objects = prefers_positioned_layout(source)
         with TemporaryDirectory(prefix="fileconvert-") as directory:
             scratch = Path(directory)
             candidate = scratch / ("result" + extension(target))
-            convert(source, candidate, args.hwpx_structure, args.pdf_objects)
+            convert(source, candidate, args.hwpx_structure, pdf_objects)
             source_pdf = scratch / "source.pdf"
             output_pdf = scratch / "output.pdf"
             render(source, source_pdf)
             render(candidate, output_pdf)
             report = compare(source_pdf, output_pdf)
             report["hwpx_structure"] = args.hwpx_structure
-            report["pdf_objects"] = args.pdf_objects
+            report["pdf_objects"] = pdf_objects
             report["input_format"] = extension(source)
             report["output_format"] = extension(target)
             if report_path:
