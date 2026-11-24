@@ -8,7 +8,7 @@ from docx import Document
 from docx.enum.section import WD_SECTION_START
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt, RGBColor
+from docx.shared import Pt, RGBColor, Twips
 from lxml import etree
 
 SECTION = re.compile(r"Contents/section(\d+)\.xml")
@@ -173,19 +173,22 @@ class Converter:
         page = next((node for node in root.iter() if kind(node) == "pagePr"), None)
         if page is None:
             return
+        paper_size = []
         for key in ("width", "height"):
             value = int(page.get(key, "0"))
             if value > 0:
-                setattr(section, "page_" + key, Pt(value / 100))
+                length = Twips(round(value / 5))
+                setattr(section, "page_" + key, length)
+                paper_size.append(length.pt)
         margins = first(page, "margin")
-        if margins is None:
-            return
-        for key in ("top", "bottom", "left", "right"):
-            if margins.get(key) is not None:
-                setattr(section, key + "_margin", Pt(int(margins.get(key)) / 100))
-        for key in ("header", "footer"):
-            if margins.get(key) is not None:
-                setattr(section, key + "_distance", Pt(int(margins.get(key)) / 100))
+        if margins is not None:
+            for key in ("top", "bottom", "left", "right"):
+                if margins.get(key) is not None:
+                    setattr(section, key + "_margin", Pt(int(margins.get(key)) / 100))
+            for key in ("header", "footer"):
+                if margins.get(key) is not None:
+                    setattr(section, key + "_distance", Pt(int(margins.get(key)) / 100))
+        return tuple(paper_size) if len(paper_size) == 2 else None
 
     def save(self, target):
         sections = sorted(
@@ -194,15 +197,17 @@ class Converter:
         )
         if not sections:
             raise ValueError("HWPX does not contain a body section")
+        paper_sizes = set()
         for index, (_, name) in enumerate(sections):
             root = xml(self.package, name)
             section = self.document.add_section(WD_SECTION_START.NEW_PAGE) if index else self.document.sections[0]
-            self.configure_page(section, root)
+            paper_sizes.add(self.configure_page(section, root))
             for paragraph in elements(root, "p"):
                 self.add_paragraph(self.document, paragraph)
         self.document.save(target)
+        return paper_sizes if None not in paper_sizes else ()
 
 
 def convert(source, target):
     with ZipFile(source) as package:
-        Converter(package).save(target)
+        return Converter(package).save(target)

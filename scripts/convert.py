@@ -131,12 +131,13 @@ def upstream_to_word(source, target):
         raise RuntimeError(detail.splitlines()[-1] if detail else "HWP/HWPX to Word conversion failed")
 
 
-def convert(source, target, hwpx_structure=False, pdf_objects=False):
+def convert(source, target, pdf_objects=False):
     start, end = extension(source), extension(target)
-    if hwpx_structure:
+    paper_sizes = ()
+    if (start, end) == (".hwpx", ".docx"):
         from hwpx import convert as convert_structure
 
-        convert_structure(source, target)
+        paper_sizes = convert_structure(source, target)
     elif pdf_objects:
         from pdf_objects import reconstruct
 
@@ -180,9 +181,28 @@ def convert(source, target, hwpx_structure=False, pdf_objects=False):
     else:
         office("hancom" if {start, end} & HANCOM else "word", source, target)
     validate(target)
+    return paper_sizes
 
 
-def compare(source_pdf, target_pdf):
+def restore_hwpx_paper_box(page, render_size, paper_sizes):
+    # Hancom's PDF exporter can crop a small strip from the declared sheet.
+    # Restore the missing canvas without scaling or translating page content.
+    candidates = [size for size in paper_sizes if all(
+        -0.001 <= declared - rendered <= 2.001
+        for declared, rendered in zip(size, render_size)
+    )]
+    if len(candidates) != 1 or candidates[0] == render_size:
+        return
+    width, height = candidates[0]
+    if page.get_rotation() in (90, 270):
+        width, height = height, width
+    left, _, _, top = page.get_bbox()
+    box = left, top - height, left + width, top
+    page.set_mediabox(*box)
+    page.set_cropbox(*box)
+
+
+def compare(source_pdf, target_pdf, paper_sizes=()):
     from PIL import ImageChops
     import pypdfium2 as pdfium
 
@@ -190,18 +210,24 @@ def compare(source_pdf, target_pdf):
     with closing(pdfium.PdfDocument(source_pdf)) as original, closing(pdfium.PdfDocument(target_pdf)) as result:
         for index in range(min(len(original), len(result))):
             with closing(original[index]) as left, closing(result[index]) as right:
+                source_render_size = left.get_size()
+                if paper_sizes:
+                    restore_hwpx_paper_box(left, source_render_size, paper_sizes)
+                source_size, output_size = left.get_size(), right.get_size()
                 left_image, right_image = page_image(left), page_image(right)
-                same_size = all(abs(a - b) <= 0.001 for a, b in zip(left.get_size(), right.get_size()))
+                same_size = all(abs(a - b) <= 0.001 for a, b in zip(source_size, output_size))
                 bounds = None
                 if left_image.size == right_image.size:
                     bounds = ImageChops.difference(left_image, right_image).getbbox()
                 pages.append({
                     "page": index + 1,
-                    "source_size_pt": left.get_size(),
-                    "output_size_pt": right.get_size(),
+                    "source_size_pt": source_size,
+                    "output_size_pt": output_size,
                     "changed_pixel_bounds": bounds,
                     "match": same_size and left_image.size == right_image.size and bounds is None,
                 })
+                if source_render_size != source_size:
+                    pages[-1]["source_render_size_pt"] = source_render_size
         return {
             "dpi": DPI,
             "source_pages": len(original),
@@ -217,12 +243,15 @@ def main():
     parser.add_argument("output", nargs="?", type=Path)
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--report", type=Path)
-    parser.add_argument("--allow-differences", action="store_true",
-                        help="Save a visual mismatch if the page count still matches.")
+    visual_modes = parser.add_mutually_exclusive_group()
+    visual_modes.add_argument("--allow-differences", action="store_true",
+                              help="Save a visual mismatch if the page count still matches.")
+    visual_modes.add_argument("--require-visual-match", action="store_true",
+                              help="Require pixel equality even for editable HWPX to DOCX output.")
     parser.add_argument("--allow-page-count-change", action="store_true",
                         help="Allow reflow to a different page count for editable document output.")
     parser.add_argument("--hwpx-structure", action="store_true",
-                        help="Use the direct HWPX XML importer for HWPX to DOCX.")
+                        help="Legacy HWPX to DOCX flag. Require an exact match unless differences are allowed.")
     pdf_modes = parser.add_mutually_exclusive_group()
     pdf_modes.add_argument("--pdf-reflow", action="store_true",
                            help="Reconstruct paragraphs and tables even for a designed PDF.")
@@ -236,15 +265,17 @@ def main():
     if args.input is None or args.output is None:
         parser.error("Pass both input and output paths, or use --list.")
     source, target = args.input.resolve(), args.output.resolve()
-    if (extension(source), extension(target)) not in PAIRS:
+    pair = extension(source), extension(target)
+    if pair not in PAIRS:
         parser.error("Unsupported conversion pair. See --list.")
+    is_hwpx_to_docx = pair == (".hwpx", ".docx")
     if args.allow_page_count_change and (
         not args.allow_differences or extension(target) not in HANCOM | WORD
     ):
         parser.error("--allow-page-count-change requires --allow-differences and editable document output.")
-    if args.hwpx_structure and (extension(source), extension(target)) != (".hwpx", ".docx"):
+    if args.hwpx_structure and not is_hwpx_to_docx:
         parser.error("--hwpx-structure requires HWPX input and DOCX output.")
-    is_pdf_to_docx = (extension(source), extension(target)) == (".pdf", ".docx")
+    is_pdf_to_docx = pair == (".pdf", ".docx")
     if (args.pdf_objects or args.pdf_reflow) and not is_pdf_to_docx:
         parser.error("PDF layout options require PDF input and DOCX output.")
     report_path = args.report.resolve() if args.report else None
@@ -260,13 +291,13 @@ def main():
         with TemporaryDirectory(prefix="fileconvert-") as directory:
             scratch = Path(directory)
             candidate = scratch / ("result" + extension(target))
-            convert(source, candidate, args.hwpx_structure, pdf_objects)
+            paper_sizes = convert(source, candidate, pdf_objects=pdf_objects)
             source_pdf = scratch / "source.pdf"
             output_pdf = scratch / "output.pdf"
             render(source, source_pdf)
             render(candidate, output_pdf)
-            report = compare(source_pdf, output_pdf)
-            report["hwpx_structure"] = args.hwpx_structure
+            report = compare(source_pdf, output_pdf, paper_sizes)
+            report["hwpx_structure"] = is_hwpx_to_docx
             report["pdf_objects"] = pdf_objects
             report["input_format"] = extension(source)
             report["output_format"] = extension(target)
@@ -284,7 +315,8 @@ def main():
                     file=sys.stderr,
                 )
                 return 2
-            if not report["visual_match"] and not args.allow_differences:
+            editable_hwpx_default = is_hwpx_to_docx and not (args.require_visual_match or args.hwpx_structure)
+            if not report["visual_match"] and not (editable_hwpx_default or args.allow_differences):
                 print(f"Visual comparison failed at {DPI} DPI. Output was not saved.", file=sys.stderr)
                 return 2
             with candidate.open("rb") as data, target.open("xb") as destination:
