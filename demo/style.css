@@ -27,3 +27,5 @@ button{width:100%}button:disabled{background:#dbe7e6;color:#526c71;cursor:defaul
 [hidden]{display:none!important}:focus-visible{outline:3px solid #008e80;outline-offset:3px}
 @media(max-width:760px){.layout{grid-template-columns:1fr}.intro{padding-top:36px}}
 @media(max-width:440px){.wrap{width:calc(100% - 24px)}.panel{padding:16px}.controls{grid-template-columns:1fr}}
+
+.retry{margin-top:10px;color:#005a50;background:#edf7f5;border:1px solid #89b7b0}

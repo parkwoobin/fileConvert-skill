@@ -145,12 +145,16 @@ class Handler(BaseHTTPRequestHandler):
                 summary = {key: report[key] for key in ("source_pages", "output_pages", "visual_match")}
             if result.returncode or not output_file.is_file():
                 if result.returncode == 2 and summary:
-                    different_count = summary["source_pages"] != summary["output_pages"]
-                    message = ("페이지 수가 달라 결과가 저장되지 않았습니다." if different_count
-                               else "렌더링 비교에서 차이가 발견되어 결과가 저장되지 않았습니다.")
+                    if summary["source_pages"] != summary["output_pages"]:
+                        code = "page-count-changed"
+                        message = "페이지 수가 달라 결과 파일을 제공할 수 없습니다."
+                    else:
+                        code = "visual-difference"
+                        message = "변환은 완료됐지만, 원본과 화면이 달라 현재 설정으로는 다운로드할 수 없습니다."
                 else:
+                    code = "conversion-failed"
                     message = "파일 형식과 암호 설정, 변환에 필요한 Office 앱이 설치되어 있는지 확인해 주세요."
-                self.json_reply(422, {"message": message, **summary})
+                self.json_reply(422, {"code": code, "message": message, **summary})
                 return
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/octet-stream")

@@ -17,7 +17,6 @@ import pymupdf as pdf
 
 V = "{urn:schemas-microsoft-com:vml}"
 O = "{urn:schemas-microsoft-com:office:office}"
-R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 SVG = "{http://www.w3.org/2000/svg}"
 XLINK = "{http://www.w3.org/1999/xlink}href"
 
@@ -88,6 +87,26 @@ def drawing_events(page):
             yield drawing["seqno"], drawing, clip
 
 
+def split_fields(chars):
+    """Keep white space reserved for handwriting at its original position."""
+    start = 0
+    index = 0
+    while index < len(chars):
+        if not chr(chars[index][0]).isspace():
+            index += 1
+            continue
+        end = index + 1
+        while end < len(chars) and chr(chars[end][0]).isspace():
+            end += 1
+        if end - index >= 2 or index == start or end == len(chars):
+            if index > start:
+                yield chars[start:index]
+            start = end
+        index = end
+    if start < len(chars):
+        yield chars[start:]
+
+
 def text_rows(page, clips):
     traces = page.get_texttrace()
     if len(traces) != len(clips):
@@ -102,8 +121,8 @@ def text_rows(page, clips):
             if 0 < code <= 0x10ffff and not 0xd800 <= code <= 0xdfff and (box & clip).get_area() >= box.get_area() * .70:
                 rows.setdefault(round(origin[1], 1), []).append(char)
         for chars in rows.values():
-            if "".join(chr(c[0]) for c in chars).strip():
-                yield span["seqno"], span, chars
+            for field in split_fields(chars):
+                yield span["seqno"], span, field
 
 
 def char_bounds(chars):
@@ -164,7 +183,7 @@ def coalesce_rows(rows):
                 start, y = chars[0][2]
                 gap = start - end
                 if (
-                    -.4 <= gap <= .46 * span["size"]
+                    -.16 * span["size"] <= gap <= .46 * span["size"]
                     and span["font"] == prev_style["font"]
                     and abs(span["size"] - prev_style["size"]) < .08
                     and span["color"] == prev_style["color"]
@@ -457,11 +476,34 @@ class Writer:
             crop = page.get_pixmap(matrix=pdf.Matrix(2, 2), clip=rect)
             stream = BytesIO(crop.tobytes("png"))
         stream.seek(0)
-        rel, _ = self.doc.part.get_or_add_image(stream)
-        node = self.shape(paragraph, rect, seq, "rect")
-        node.set("stroked", "f")
-        pic = etree.SubElement(node, V + "imagedata")
-        pic.set(R + "id", rel)
+        run = paragraph.add_run()
+        inline = run.add_picture(stream, width=Pt(rect.width), height=Pt(rect.height))._inline
+        anchor = OxmlElement("wp:anchor")
+        for name, value in {
+            "distT": "0", "distB": "0", "distL": "0", "distR": "0",
+            "simplePos": "0", "relativeHeight": str(251658240 + seq),
+            "behindDoc": "0", "locked": "0", "layoutInCell": "1", "allowOverlap": "1",
+        }.items():
+            anchor.set(name, value)
+        simple = OxmlElement("wp:simplePos")
+        simple.set("x", "0")
+        simple.set("y", "0")
+        anchor.append(simple)
+        for direction, position in (("H", rect.x0), ("V", rect.y0)):
+            placement = OxmlElement("wp:position" + direction)
+            placement.set("relativeFrom", "page")
+            offset = OxmlElement("wp:posOffset")
+            offset.text = str(int(Pt(position)))
+            placement.append(offset)
+            anchor.append(placement)
+        anchor.append(inline.extent)
+        anchor.append(OxmlElement("wp:wrapNone"))
+        anchor.append(inline.docPr)
+        frame = inline.xpath("wp:cNvGraphicFramePr")
+        if frame:
+            anchor.append(frame[0])
+        anchor.append(inline.graphic)
+        inline.getparent().replace(inline, anchor)
 
     def add_page(self, page):
         size = (page.rect.width, page.rect.height)

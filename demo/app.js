@@ -33,6 +33,7 @@ function resetDownload() {
     objectUrl = '';
     download.removeAttribute('href');
     download.hidden = true;
+    retry.hidden = true;
 }
 function choices(select, values) {
     select.replaceChildren(...values.map(([value, label]) => new Option(label, value)));
@@ -76,6 +77,11 @@ mode.addEventListener('change', () => {
     $('mode-detail').textContent = modes[source + ':' + format.value]?.find(item => item[0] === mode.value)?.[2] || '';
 });
 strict.addEventListener('change', () => {resetDownload(); message('');});
+retry.addEventListener('click', () => {
+    if (active) return;
+    strict.checked = false;
+    $('convert-form').requestSubmit();
+});
 for (const event of ['dragenter', 'dragover']) drop.addEventListener(event, e => {
     e.preventDefault(); if (!active) drop.classList.add('drag');
 });
@@ -107,7 +113,8 @@ $('convert-form').addEventListener('submit', async e => {
         if (!response.ok) {
             const failure = await response.json();
             const pages = failure.source_pages == null ? '' : ` 원본 ${failure.source_pages}페이지, 결과 ${failure.output_pages}페이지.`;
-            message(failure.message + pages, true);
+            message(failure.message + pages, failure.code !== 'visual-difference');
+            retry.hidden = failure.code !== 'visual-difference' || !strict.checked;
             return;
         }
         const result = JSON.parse(response.headers.get('X-Conversion-Report') || '{}');
