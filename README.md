@@ -1,9 +1,12 @@
 # FileConvert Skill
 
-[![Agent Skill](https://img.shields.io/badge/Agent_Skill-SKILL.md-8A2BE2)](SKILL.md)
-[![Works with Claude Code and Codex](https://img.shields.io/badge/Works_with-Claude_Code_%7C_Codex-orange)](#claude-code와-codex에-설치)
-[![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB)](#claude-code와-codex에-설치)
-[![Windows](https://img.shields.io/badge/Platform-Windows-0078D4)](#claude-code와-codex에-설치)
+<p>
+  <a href="SKILL.md"><img alt="Format SKILL.md" src="https://img.shields.io/badge/format-SKILL.md-8A2BE2?style=flat-square"></a>
+  <a href="#claude-code와-codex에-설치"><img alt="Claude Code and Codex" src="https://img.shields.io/badge/agents-Claude_Code_%C2%B7_Codex-E47931?style=flat-square"></a>
+  <a href="#claude-code와-codex에-설치"><img alt="Python 3.13 tested" src="https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square"></a>
+  <a href="#claude-code와-codex에-설치"><img alt="Windows" src="https://img.shields.io/badge/platform-Windows-0078D4?style=flat-square"></a>
+  <a href="#사용한-스킬"><img alt="Skills used" src="https://img.shields.io/badge/workflow-사용한_스킬-147D70?style=flat-square"></a>
+</p>
 
 HWPX, HWP, Word, PDF, PowerPoint 문서를 로컬에서 양방향으로 변환하고 렌더링 결과를 비교하는 Claude Code와 Codex용 문서 변환 스킬입니다.
 
@@ -35,7 +38,7 @@ PDF를 Word나 한글 문서로 가져올 때 단, 머리말, 각주, 수식 및
 
 ## Claude Code와 Codex에 설치
 
-스킬 이름은 `file-convert-skill`이며, 실행 절차는 [SKILL.md](SKILL.md)에 있습니다. 스킬 작성과 형식 검증에 Codex의 `skill-creator`를 사용했습니다.
+스킬 이름은 `file-convert-skill`이며, 실행 절차는 [SKILL.md](SKILL.md)에 있습니다.
 
 이 저장소의 `SKILL.md`, `scripts/`, `requirements.txt`를 한 폴더에 둡니다. 설치 폴더 이름은 `file-convert-skill`로 지정합니다.
 
@@ -56,6 +59,16 @@ git clone https://github.com/parkwoobin/fileConvert-skill.git (Join-Path $skillR
 필요한 변환 프로그램과 Python 의존성을 설치한 뒤 새 세션에서 스킬을 호출합니다. 한컴과 Microsoft Office 의존 경로는 해당 앱을 실행할 수 있는 Windows 환경이 필요합니다.
 
 [Claude Code 스킬 문서](https://code.claude.com/docs/en/skills) · [Codex 설치 경로 안내](https://developers.openai.com/api/reference/cli)
+
+## 사용한 스킬
+
+| 스킬 | 사용한 작업 |
+| --- | --- |
+| [`file-convert-skill`](SKILL.md) | 샘플 문서를 실제 변환하고 페이지 수, 표 및 Word 개체의 편집 가능 여부 확인 |
+| `skill-creator` | 스킬 실행 지침 작성과 `SKILL.md` 형식 검증 |
+| `skill-installer` | 공개 GitHub 저장소에서 Windows의 Codex 및 Claude Code에 스킬 설치 |
+| `pdf` | 원본과 Word 결과의 PDF 렌더링, 줄 위치 및 각주 구분선 비교 |
+| `graphify` | GetConvert 웹사이트와 FileConvert 변환 스킬의 연동 구조 확인 |
 
 ## 검증 결과
 
