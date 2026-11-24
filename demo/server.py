@@ -83,8 +83,7 @@ class Handler(BaseHTTPRequestHandler):
         options = parse_qs(route.query)
         source = "." + options.get("from", [""])[0]
         target = "." + options.get("to", [""])[0]
-        fidelity = options.get("fidelity", ["strict"])[0]
-        if (source, target) not in PAIRS or fidelity not in {"strict", "same-pages"}:
+        if (source, target) not in PAIRS:
             self.json_reply(400, {"message": "지원하는 출력 형식을 선택해 주세요."})
             return
         if self.headers.get_content_type() != "application/octet-stream":
@@ -101,13 +100,13 @@ class Handler(BaseHTTPRequestHandler):
             self.json_reply(429, {"message": "다른 파일을 변환하고 있어요. 잠시 후 다시 시도해 주세요."})
             return
         try:
-            self.run_conversion(length, source, target, fidelity)
+            self.run_conversion(length, source, target)
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
             self.close_connection = True
         finally:
             CONVERSION.release()
 
-    def run_conversion(self, length, source, target, fidelity):
+    def run_conversion(self, length, source, target):
         with TemporaryDirectory(prefix="getconvert-demo-") as folder:
             root = Path(folder)
             input_file = root / ("input" + source)
@@ -140,8 +139,7 @@ class Handler(BaseHTTPRequestHandler):
                        str(input_file), str(output_file), "--report", str(report_file)]
             if (source, target) == (".pdf", ".docx"):
                 command.append("--pdf-objects")
-            if fidelity == "same-pages":
-                command.append("--allow-differences")
+            command.append("--allow-differences")
             try:
                 result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                         timeout=LIMIT_SECONDS, check=False)
@@ -153,13 +151,9 @@ class Handler(BaseHTTPRequestHandler):
                 report = json.loads(report_file.read_text(encoding="utf-8"))
                 summary = {key: report[key] for key in ("source_pages", "output_pages", "visual_match")}
             if result.returncode or not output_file.is_file():
-                if result.returncode == 2 and summary:
-                    if summary["source_pages"] != summary["output_pages"]:
-                        code = "page-count-changed"
-                        message = "페이지 수가 달라 결과 파일을 제공할 수 없습니다."
-                    else:
-                        code = "visual-difference"
-                        message = "변환은 완료됐지만, 원본과 화면이 달라 현재 설정으로는 다운로드할 수 없습니다."
+                if result.returncode == 2 and summary and summary["source_pages"] != summary["output_pages"]:
+                    code = "page-count-changed"
+                    message = "페이지 수가 달라 결과 파일을 제공할 수 없습니다."
                 else:
                     code = "conversion-failed"
                     message = "파일 형식과 암호 설정, 변환에 필요한 Office 앱이 설치되어 있는지 확인해 주세요."

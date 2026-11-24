@@ -6,7 +6,6 @@ const format = $('format');
 const submit = $('submit');
 const status = $('status');
 const download = $('download');
-const strict = $('strict');
 let settings = null;
 let file = null;
 let source = '';
@@ -22,7 +21,6 @@ function resetDownload() {
     objectUrl = '';
     download.removeAttribute('href');
     download.hidden = true;
-    retry.hidden = true;
 }
 function choices(select, values) {
     select.replaceChildren(...values.map(([value, label]) => new Option(label, value)));
@@ -53,12 +51,6 @@ function selectFile(next) {
 }
 fileInput.addEventListener('change', () => selectFile(fileInput.files[0]));
 format.addEventListener('change', () => {resetDownload(); message('');});
-strict.addEventListener('change', () => {resetDownload(); message('');});
-retry.addEventListener('click', () => {
-    if (active) return;
-    strict.checked = false;
-    $('convert-form').requestSubmit();
-});
 for (const event of ['dragenter', 'dragover']) drop.addEventListener(event, e => {
     e.preventDefault(); if (!active) drop.classList.add('drag');
 });
@@ -76,13 +68,12 @@ $('convert-form').addEventListener('submit', async e => {
     if (active || !file || !format.value) return;
     resetDownload();
     active = true;
-    fileInput.disabled = format.disabled = strict.disabled = submit.disabled = true;
+    fileInput.disabled = format.disabled = submit.disabled = true;
     submit.textContent = '변환 중';
     message('문서를 변환하고 페이지를 확인하고 있습니다.');
     try {
         const query = new URLSearchParams({
             from: source, to: format.value,
-            fidelity: strict.checked ? 'strict' : 'same-pages',
         });
         const response = await fetch('/api/convert?' + query, {
             method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: file,
@@ -90,8 +81,7 @@ $('convert-form').addEventListener('submit', async e => {
         if (!response.ok) {
             const failure = await response.json();
             const pages = failure.source_pages == null ? '' : ` 원본 ${failure.source_pages}페이지, 결과 ${failure.output_pages}페이지.`;
-            message(failure.message + pages, failure.code !== 'visual-difference');
-            retry.hidden = failure.code !== 'visual-difference' || !strict.checked;
+            message(failure.message + pages, true);
             return;
         }
         const result = JSON.parse(response.headers.get('X-Conversion-Report') || '{}');
@@ -106,7 +96,7 @@ $('convert-form').addEventListener('submit', async e => {
         message('서버와 연결되지 않았습니다. 데모 서버가 실행 중인지 확인해 주세요.', true);
     } finally {
         active = false;
-        fileInput.disabled = format.disabled = strict.disabled = submit.disabled = false;
+        fileInput.disabled = format.disabled = submit.disabled = false;
         submit.textContent = '변환하기';
     }
 });

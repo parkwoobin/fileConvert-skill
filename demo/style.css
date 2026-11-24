@@ -16,10 +16,8 @@ body{margin:0}.wrap{width:min(1080px,calc(100% - 40px));margin:auto}
 .controls label{display:grid;gap:8px;font-weight:700;font-size:.95rem}
 select{width:100%;font:inherit;font-weight:400;padding:9px 12px;border:1px solid #aac5c3;border-radius:8px;min-height:44px;color:#102334;background:white}
 select:disabled{color:#546a72;background:#f4f7f7}
-.check{display:flex;align-items:center;gap:9px;margin:12px 0 17px;font-size:.93rem}
-.check input{width:18px;height:18px;accent-color:#00695d}
 button,.download{min-height:46px;padding:11px 18px;border-radius:8px;border:0;background:#00695d;color:white;font:inherit;font-weight:700;cursor:pointer;text-align:center}
-button{width:100%}button:disabled{background:#dbe7e6;color:#526c71;cursor:default}
+#submit{width:100%;margin-top:16px}button:disabled{background:#dbe7e6;color:#526c71;cursor:default}
 .guide h2{font-size:1.12rem;margin:0 0 19px}.guide dl{margin:0}.guide dt{font-weight:700;margin-top:16px}.guide dd{font-size:.92rem;margin:.35rem 0 0}
 .privacy{margin-top:22px;border-top:1px solid #dce9e8;padding-top:12px;font-size:.89rem}
 #status{background:#edf7f5;padding:12px;border-radius:8px;margin-top:13px;font-size:.94rem;line-height:1.55}
@@ -27,5 +25,3 @@ button{width:100%}button:disabled{background:#dbe7e6;color:#526c71;cursor:defaul
 [hidden]{display:none!important}:focus-visible{outline:3px solid #008e80;outline-offset:3px}
 @media(max-width:760px){.layout{grid-template-columns:1fr}.intro{padding-top:36px}}
 @media(max-width:440px){.wrap{width:calc(100% - 24px)}.panel{padding:16px}}
-
-.retry{margin-top:10px;color:#005a50;background:#edf7f5;border:1px solid #89b7b0}
