@@ -140,7 +140,9 @@ def convert(source, target, hwpx_structure=False, pdf_objects=False):
     elif pdf_objects:
         from pdf_objects import reconstruct
 
-        reconstruct(source, target)
+        draft = target.with_name("positioned-legacy.docx")
+        reconstruct(source, draft)
+        office("word-modern", draft, target)
     elif start in HANCOM and end == ".docx":
         upstream_to_word(source, target)
     elif end == ".pdf":

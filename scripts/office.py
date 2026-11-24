@@ -36,7 +36,7 @@ def fit_word_table_images(doc):
             picture.Width = usable
 
 
-def word(source, target, fit_table_images=False):
+def word(source, target, fit_table_images=False, modern_docx=False):
     from win32com.client import DispatchEx
 
     app = DispatchEx("Word.Application")
@@ -44,9 +44,12 @@ def word(source, target, fit_table_images=False):
         app.DisplayAlerts = 0
         app.AutomationSecurity = 3
         app.Options.UpdateLinksAtOpen = False
-        doc = app.Documents.Open(str(source), ReadOnly=True, AddToRecentFiles=False)
+        doc = app.Documents.Open(str(source), ReadOnly=not modern_docx, AddToRecentFiles=False)
         try:
-            if target.suffix.lower() == ".pdf":
+            if modern_docx:
+                doc.Convert()
+                doc.SaveAs2(str(target), FileFormat=16, CompatibilityMode=15)
+            elif target.suffix.lower() == ".pdf":
                 if fit_table_images:
                     fit_word_table_images(doc)
                 doc.ExportAsFixedFormat(str(target), 17)
@@ -80,7 +83,7 @@ if __name__ == "__main__":
     source, target = Path(source_path), Path(target_path)
     if engine == "hancom":
         hancom(source, target, module_name)
-    elif engine == "word":
-        word(source, target, "--fit-table-images" in options)
+    elif engine in {"word", "word-modern"}:
+        word(source, target, "--fit-table-images" in options, modern_docx=engine == "word-modern")
     else:
         powerpoint(source, target)
