@@ -1,13 +1,14 @@
 ---
 name: file-convert-skill
-description: Convert HWPX, HWP, Word, PDF, and PowerPoint files through the supported pairs, and verify layout fidelity including fonts, spacing, and pagination by comparing rendered pages.
+description: Convert HWPX, HWP, Word, PDF, and PowerPoint documents locally and verify their layout. Use when a user wants a document in another supported format or asks whether formatting and page layout survived a conversion.
 ---
 
-Use `python scripts/convert.py --list` to see the supported directions.
-Run `python scripts/convert.py INPUT OUTPUT --report report.json`. Conversion verifies rendered pages by default and keeps the output only if the pages match. Read the report before claiming a match. A match is limited to the tested render settings and does not establish editability or structural equivalence.
+Use the bundled converter on a Windows desktop with the Office apps required for the requested formats. Read [setup and format details](README.md) if the required apps or the correct conversion mode are unclear.
 
-HWP → DOCX uses the vendored morningkim parser, HWPX → DOCX uses the vendored kangdacool exporter, and PDF → DOCX chooses positioned Word objects for documents with strong visual layout signals and pdf2docx for typical text and table documents. CLI flags `--pdf-objects` and `--pdf-reflow` override this choice. PDF → HWP/HWPX also tries positioned conversion when page and content checks pass. Reverse Word → Hancom conversion uses the native Hancom engine. Check editable tables, images, equations, footnotes, endnotes, headers, footers, page numbering, and font substitution separately in the destination application when those matter. For editable HWPX text, images and tables, use the optional `--hwpx-structure` importer and check the documented omissions. Never rename a file to simulate conversion.
+1. Resolve the skill folder from this `SKILL.md`. Run `python <skill-folder>/scripts/convert.py --list` to check the requested direction.
+2. Use absolute input and output paths. Run `python <skill-folder>/scripts/convert.py INPUT OUTPUT --report REPORT.json`. Choose new paths for both the output and report.
+3. Inspect the report before describing the result. The default saves output only when the rendered pages match. A render match measures appearance at the tested settings. Check requested editable structures, such as tables, formulas, footnotes and page fields, in the output independently.
 
-PDF to a document uses pdf2docx reconstruction and can change typography and layout. PDF to PowerPoint places a rendered image onto each slide and does not reconstruct editable text. Explain these limits before interpreting the results. Use `--allow-differences` only when the user accepts a result that differs visually. A page count mismatch blocks saving unless the user accepts reflow and `--allow-page-count-change` is enabled for editable document output. Check rendered pages before sharing any result with known differences. See [setup and verification](README.md).
+When a user accepts visual differences, add `--allow-differences`. For an editable document whose pages may reflow, also add `--allow-page-count-change`. PDF → HWP/HWPX still requires the original page count.
 
-For a fixed-layout PDF with selectable text, try `--pdf-objects` with DOCX output. It reconstructs positioned Word text boxes, shapes, and pictures and groups adjacent lines with the same typography into editable blocks. Check selected pages in desktop Word for visibility, clipping, and editability before sharing. This mode approximates typography and does not recreate semantic tables or reflowing paragraphs.
+For HWPX → DOCX, `--hwpx-structure` prioritizes editable paragraphs, pictures and tables and has format-specific omissions. For PDF → DOCX, use `--pdf-reflow` when semantic paragraphs and tables matter, or `--pdf-objects` when preserving the placement of editable text boxes and shapes matters. The converter chooses between those modes by default. For PDF → PPT/PPTX, explain that the resulting slides contain rendered page images. Scanned text needs OCR before a text-editable conversion.

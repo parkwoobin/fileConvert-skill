@@ -21,7 +21,7 @@ PAIRS = {
         *((".pdf", ext) for ext in sorted(HANCOM | WORD | SLIDES)),
     ]
     for a, b in [(left, right), (right, left)]
-}
+} | {(".doc", ".docx"), (".hwp", ".hwpx")}
 DPI = 144
 OLE = bytes.fromhex("d0cf11e0a1b11ae1")
 
