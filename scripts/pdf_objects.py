@@ -147,6 +147,55 @@ def visible_text(page, clips, covers):
         yield seq,span,chars
 
 
+def coalesce_rows(rows):
+    bands = []
+    for seq, span, chars in sorted(rows, key=lambda row: (row[2][0][2][1], row[2][0][2][0])):
+        baseline = chars[0][2][1]
+        if bands and abs(bands[-1][0] - baseline) <= .4:
+            bands[-1][1].append((seq, span, chars))
+        else:
+            bands.append((baseline, [(seq, span, chars)]))
+    for _, band in bands:
+        current = None
+        for seq, span, chars in sorted(band, key=lambda row: row[2][0][2][0]):
+            if current:
+                prev_seq, prev_style, prev_chars = current
+                end = char_bounds(prev_chars).x1
+                start, y = chars[0][2]
+                gap = start - end
+                if (
+                    -.4 <= gap <= .46 * span["size"]
+                    and span["font"] == prev_style["font"]
+                    and abs(span["size"] - prev_style["size"]) < .08
+                    and span["color"] == prev_style["color"]
+                ):
+                    spacer = []
+                    if gap >= .12 * span["size"] and not chr(prev_chars[-1][0]).isspace() and not chr(chars[0][0]).isspace():
+                        last = prev_chars[-1][3]
+                        spacer = [(32, 0, (end, y), (end, last[1], start, last[3]))]
+                    current = max(seq, prev_seq), prev_style, prev_chars + spacer + chars
+                    continue
+                yield current
+            current = seq, span, chars
+        if current:
+            yield current
+
+
+def clip_segment(a, b, rect):
+    dx, dy = b.x-a.x, b.y-a.y
+    lo, hi = 0., 1.
+    for p,q in ((-dx,a.x-rect.x0),(dx,rect.x1-a.x),(-dy,a.y-rect.y0),(dy,rect.y1-a.y)):
+        if p < 0:
+            lo = max(lo,q/p)
+        elif p > 0:
+            hi = min(hi,q/p)
+        elif q < 0:
+            return None
+    if hi <= lo:
+        return None
+    return pdf.Point(a.x+lo*dx,a.y+lo*dy), pdf.Point(a.x+hi*dx,a.y+hi*dy)
+
+
 def text_blocks(rows):
     blocks = []
     for seq, span, chars in sorted(rows, key=lambda row: (row[2][0][2][1], row[2][0][2][0])):
@@ -323,17 +372,31 @@ class Writer:
         if clipped.is_empty:
             return
         if clipped.get_area() < rect.get_area() * .995:
-            if draw.get("fill") is None:
-                return
-            polygons = [clip_polygon(points, clip) for points in contours(draw["items"])]
-            polygons = [points for points in polygons if len(points) >= 3]
-            if not polygons:
-                return
-            rect = clipped
-            draw = {**draw, "color": None, "closePath": True, "items": [
-                ("l", a, b) for points in polygons
-                for a,b in zip(points, points[1:]+points[:1])
-            ]}
+            self.clipped_path(paragraph, seq, draw, clip, clipped)
+            return
+        self.draw_path(paragraph, seq, draw, rect)
+
+    def clipped_path(self, paragraph, seq, draw, clip, rect):
+        paths = list(contours(draw["items"]))
+        if draw.get("fill") is not None:
+            polygons = [clip_polygon(points, clip) for points in paths]
+            items = [("l", a, b) for points in polygons if len(points) >= 3
+                     for a,b in zip(points, points[1:]+points[:1])]
+            if items:
+                self.draw_path(paragraph, seq, {**draw, "items": items, "color": None, "closePath": True}, rect)
+        if draw.get("color") is not None:
+            segments = []
+            for points in paths:
+                if draw.get("closePath") or (len(draw["items"]) == 1 and draw["items"][0][0] in {"re", "qu"}):
+                    points = points + points[:1]
+                for a, b in zip(points, points[1:]):
+                    segment = clip_segment(a, b, clip)
+                    if segment:
+                        segments.append(("l", *segment))
+            if segments:
+                self.draw_path(paragraph, seq, {**draw, "items": segments, "fill": None, "closePath": False}, rect)
+
+    def draw_path(self, paragraph, seq, draw, rect):
         node = self.shape(paragraph, rect, seq)
 
         def xy(p):
@@ -430,7 +493,7 @@ class Writer:
         covers = [(seq, draw["rect"] & clip) for seq, kind, args in events if kind == "path"
                   for draw, clip in [args] if draw.get("fill") is not None
                   and draw.get("fill_opacity", 1) > .99 and len(draw["items"]) == 1 and draw["items"][0][0] == "re"]
-        blocks = text_blocks(visible_text(page, text_clips, covers))
+        blocks = text_blocks(coalesce_rows(visible_text(page, text_clips, covers)))
         events += [(max(row[0] for row in block), "text", block) for block in blocks]
         for seq, kind, args in sorted(events, key=lambda x: x[0]):
             if kind == "text":
