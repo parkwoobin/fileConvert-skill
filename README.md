@@ -67,7 +67,25 @@ flowchart TD
 
 한컴 PDF가 원본 용지보다 조금 작으면 HWPX에 기록된 용지 크기로 비교 영역을 복원하고, PDF가 내보낸 크기는 `source_render_size_pt`에 남깁니다. 보정 전후의 픽셀 차이 합계는 `hwpx_rgb_error_before`와 페이지별 `rgb_error`로 비교할 수 있습니다.
 
-Windows의 Word에서 표가 있는 2페이지 샘플의 셀 편집과 별도 2페이지 샘플의 각주·미주·수식 편집을 확인했습니다. 두 결과 모두 원본의 페이지 수를 유지했습니다.
+## 실제 변환 예시
+
+공개용 합성 HWPX 두 개를 FileConvert의 기본 설정으로 변환했습니다. 비교 이미지는 한컴 한글과 Microsoft Word에서 각각 PDF로 렌더링한 뒤, 같은 페이지의 같은 영역을 나란히 배치한 것입니다. 두 샘플 모두 원본과 결과가 **2페이지**입니다.
+
+### 편집 가능한 표
+
+첫 페이지의 **2행 2열** 표를 Word에서 셀 단위로 수정할 수 있고, 두 번째 페이지의 나눔이 유지됩니다. 표의 행 높이와 머리말에는 차이가 있습니다.
+
+[원본 HWPX 다운로드](samples/hwpx-to-docx/table/source.hwpx?raw=true) · [변환된 DOCX 다운로드](samples/hwpx-to-docx/table/converted.docx?raw=true)
+
+![원본 HWPX와 변환된 DOCX의 1쪽 표 및 2쪽 페이지 나눔 비교](samples/hwpx-to-docx/table/comparison.png)
+
+### 편집 가능한 각주·미주·수식
+
+1쪽에는 각주와 수식 `x + y = z`, 2쪽에는 미주가 있습니다. 변환된 DOCX를 Word에서 열어 각주와 미주에 텍스트를 추가하고 수식의 변수를 바꾼 뒤, 저장한 문서를 다시 열어 확인했습니다. 수식 기호의 글꼴에는 차이가 남습니다.
+
+[원본 HWPX 다운로드](samples/hwpx-to-docx/notes-and-equation/source.hwpx?raw=true) · [변환된 DOCX 다운로드](samples/hwpx-to-docx/notes-and-equation/converted.docx?raw=true)
+
+![원본 HWPX와 변환된 DOCX의 1쪽 수식과 각주 및 2쪽 미주 비교](samples/hwpx-to-docx/notes-and-equation/comparison.png)
 
 ## 기타 변환 경로
 
