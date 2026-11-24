@@ -159,6 +159,10 @@ def convert(source, target, hwpx_structure=False, pdf_objects=False):
             fit(source, intermediate, target, office)
         elif end != ".docx":
             office("word", intermediate, target)
+    elif start == ".docx" and end in HANCOM:
+        from word_hancom import preserve_page_starts
+
+        preserve_page_starts(source, target, office)
     else:
         office("hancom" if {start, end} & HANCOM else "word", source, target)
     validate(target)
