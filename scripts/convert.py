@@ -174,7 +174,8 @@ def main():
     parser.add_argument("output", nargs="?", type=Path)
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--report", type=Path)
-    parser.add_argument("--allow-differences", action="store_true")
+    parser.add_argument("--allow-differences", action="store_true",
+                        help="Save a visual mismatch if the page count still matches.")
     parser.add_argument("--hwpx-structure", action="store_true",
                         help="Use the direct HWPX XML importer for HWPX to DOCX.")
     args = parser.parse_args()
@@ -210,6 +211,13 @@ def main():
                 with report_path.open("x", encoding="utf-8") as stream:
                     json.dump(report, stream, indent=2)
                     stream.write("\n")
+            if report["source_pages"] != report["output_pages"]:
+                print(
+                    f"Page count changed from {report['source_pages']} to {report['output_pages']}. "
+                    "Output was not saved.",
+                    file=sys.stderr,
+                )
+                return 2
             if not report["visual_match"] and not args.allow_differences:
                 print(f"Visual comparison failed at {DPI} DPI. Output was not saved.", file=sys.stderr)
                 return 2
